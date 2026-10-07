@@ -35,3 +35,7 @@ O servidor só escuta em 127.0.0.1 e recusa conexões WebSocket de outros sites.
 ## Testes
 
 `npm test`: indicadores, catálogo contra ruído e contra padrão plantado, motor e servidor contra uma Deriv simulada.
+
+## Publicar num servidor (Cloudflare Tunnel + Access)
+
+O app não tem login próprio. Publique **somente** atrás do Cloudflare Access (com `CF_ACCESS_TEAM_DOMAIN` e `CF_ACCESS_AUD` definidos, toda requisição HTTP e WebSocket exige um JWT válido do Access). O servidor continua escutando só em 127.0.0.1; o túnel (cloudflared) roda na mesma máquina e só faz conexões de saída. Passo a passo e script: `deploy/setup-vps.sh`.

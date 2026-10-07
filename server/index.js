@@ -5,6 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const { WebSocketServer } = require('ws');
 const { Engine } = require('./engine');
+const { createGuard } = require('./access');
 
 const PORT = Number(process.env.PORT || 3000);
 const HOST = '127.0.0.1'; // nunca exponha: o servidor guarda tokens de negociação
@@ -13,16 +14,24 @@ const CONFIG = path.join(__dirname, '..', 'data', 'config.json');
 try { for (const l of fs.readFileSync(path.join(__dirname, '..', '.env'), 'utf8').split('\n')) { const m = l.match(/^\s*([A-Z_]+)\s*=\s*(.*)\s*$/); if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, ''); } } catch {}
 
 const engine = new Engine();
+const guard = process.env.CF_ACCESS_TEAM_DOMAIN && process.env.CF_ACCESS_AUD
+  ? createGuard({ teamDomain: process.env.CF_ACCESS_TEAM_DOMAIN, aud: process.env.CF_ACCESS_AUD }) : null;
 const app = express();
+if (guard) app.use(guard.middleware); // tudo exige login do Cloudflare Access
 app.use('/vendor', express.static(path.join(__dirname, '..', 'node_modules', 'lightweight-charts', 'dist')));
 app.use(express.static(path.join(__dirname, '..', 'public')));
 app.get('/api/trades', (req, res) => res.json(engine.trades.slice(-200)));
 const server = http.createServer(app);
 
-const allowedOrigins = new Set([`http://localhost:${PORT}`, `http://127.0.0.1:${PORT}`]);
+const allowedOrigins = new Set([`http://localhost:${PORT}`, `http://127.0.0.1:${PORT}`,
+  ...(process.env.ALLOWED_ORIGIN || '').split(',').map(x => x.trim()).filter(Boolean)]); // ex.: https://trade.seudominio.com
 const wss = new WebSocketServer({
   server, path: '/ws',
-  verifyClient: ({ origin }) => !origin || allowedOrigins.has(origin), // bloqueia outros sites
+  verifyClient: (info, done) => {
+    if (info.origin && !allowedOrigins.has(info.origin)) return done(false, 403, 'origem não permitida'); // bloqueia outros sites
+    if (!guard) return done(true);
+    guard.check(info.req).then(() => done(true)).catch(() => done(false, 403, 'acesso negado'));
+  },
 });
 
 const clients = new Set();

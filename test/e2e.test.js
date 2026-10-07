@@ -19,8 +19,15 @@ test('servidor web: conectar, receber velas, comprar, origem estranha recusada',
   try {
     for (let i = 0; i < 50; i++) { try { const r = await fetch(`http://127.0.0.1:${PORT}/`); if (r.ok) break; } catch {} await wait(100); }
 
-    // outro site tentando controlar o robô é recusado
-    await new Promise(res => { const bad = new WebSocket(`ws://127.0.0.1:${PORT}/ws`, { headers: { Origin: 'https://site-malicioso.example' } }); bad.on('error', () => res()); bad.on('open', () => { assert.fail('origem estranha foi aceita'); }); bad.on('unexpected-response', (q, r) => { assert.strictEqual(r.statusCode, 401); res(); }); });
+    // outro site tentando controlar o robô é recusado (nunca aceito, nunca trava o teste)
+    const rejected = await new Promise(res => {
+      const bad = new WebSocket(`ws://127.0.0.1:${PORT}/ws`, { headers: { Origin: 'https://site-malicioso.example' } });
+      const t = setTimeout(() => res('timeout'), 5000);
+      bad.on('open', () => { clearTimeout(t); bad.close(); res('aceito'); });
+      bad.on('unexpected-response', (q, r) => { clearTimeout(t); res(r.statusCode); });
+      bad.on('error', () => {});
+    });
+    assert.ok([401, 403].includes(rejected), 'origem estranha deve ser recusada, recebeu: ' + rejected);
 
     const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`, { headers: { Origin: `http://localhost:${PORT}` } });
     const got = { candles: null, state: null, closed: null }; const acks = new Map(); let id = 1;

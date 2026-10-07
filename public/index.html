@@ -208,7 +208,7 @@ let candles = [], signal = null, open = null, trades = [];
 
 // ---------- WebSocket ----------
 function connect() {
-  ws = new WebSocket(`ws://${location.host}/ws`);
+  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
   ws.onmessage = e => { const { type, data, id, ok, error } = JSON.parse(e.data); if (type === 'ack') { const a = acks.get(id); if (a) { acks.delete(id); ok ? a.res() : a.rej(new Error(error)); } } else on[type] && on[type](data); };
   ws.onclose = () => { $('#dot').className = 'dot bad'; setTimeout(connect, 1500); };
 }
