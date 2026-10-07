@@ -1,0 +1,420 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deriv Signal Desk</title>
+<style>
+:root{
+  --bg:#0e1116; --panel:#151a22; --panel2:#1b212b; --line:#252d3a; --text:#e6e9ef; --mute:#8a94a6;
+  --up:#26a69a; --down:#ef5350; --accent:#4c8dff; --warn:#f5a623; --real:#e5484d;
+  --r:10px; font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; font-size:14px;
+}
+*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);min-height:100vh}
+button,input,select{font:inherit;color:inherit}
+header{display:flex;align-items:center;gap:14px;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel);flex-wrap:wrap}
+.brand{font-weight:700;letter-spacing:.2px} .brand span{color:var(--accent)}
+nav{display:flex;gap:2px;margin-left:8px}
+nav button{background:none;border:0;padding:8px 12px;border-radius:8px;color:var(--mute);cursor:pointer}
+nav button.on{background:var(--panel2);color:var(--text)}
+.sp{flex:1}
+.pill{display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border-radius:999px;border:1px solid var(--line);background:var(--panel2)}
+.acct{cursor:pointer;user-select:none}
+.acct b{font-weight:600}
+.acct.demo{border-color:#2b4a8a} .acct.real{border-color:var(--real);background:#2a1517}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--mute)} .dot.ok{background:var(--up)} .dot.bad{background:var(--down)}
+.tag{font-size:11px;padding:2px 7px;border-radius:6px;background:var(--line);color:var(--mute)}
+.tag.demo{background:#1d3566;color:#9db9f5} .tag.real{background:var(--real);color:#fff}
+main{padding:14px 16px;max-width:1500px;margin:0 auto}
+.view{display:none} .view.on{display:block}
+.grid{display:grid;grid-template-columns:1fr 330px;gap:14px}
+@media(max-width:1000px){.grid{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px}
+.card h3{margin:0 0 10px;font-size:12px;text-transform:uppercase;letter-spacing:.8px;color:var(--mute);font-weight:600}
+.bar{display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
+select,input[type=number],input[type=text],input[type=password]{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;outline:none;width:100%}
+select{width:auto} input:focus,select:focus{border-color:var(--accent)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{background:var(--panel2);border:0;padding:7px 14px;cursor:pointer;color:var(--mute)}
+.seg button.on{background:var(--accent);color:#fff}
+#chart{height:480px;border-radius:8px;overflow:hidden}
+.btn{border:0;border-radius:8px;padding:11px 14px;font-weight:600;cursor:pointer;width:100%}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn.up{background:var(--up);color:#04120f} .btn.down{background:var(--down);color:#fff}
+.btn.primary{background:var(--accent);color:#fff} .btn.ghost{background:var(--panel2);border:1px solid var(--line)}
+.btn.stop{background:var(--real);color:#fff}
+.row{display:flex;gap:8px} .row>*{flex:1}
+label{display:block;font-size:12px;color:var(--mute);margin:10px 0 4px}
+.signal{min-height:112px;display:flex;flex-direction:column;justify-content:center}
+.signal .none{color:var(--mute);text-align:center}
+.signal .dir{font-size:22px;font-weight:700} .signal.call .dir{color:var(--up)} .signal.put .dir{color:var(--down)}
+.signal .meta{color:var(--mute);margin-top:4px;font-size:13px}
+.meter{height:6px;background:var(--line);border-radius:4px;margin-top:10px;overflow:hidden}
+.meter i{display:block;height:100%;background:var(--accent);transition:width .3s}
+.stat{display:flex;justify-content:space-between;padding:5px 0;color:var(--mute)} .stat b{color:var(--text);font-weight:600}
+.pos{color:var(--up)} .neg{color:var(--down)}
+.notice{margin-top:12px;border:1px solid var(--accent);background:#14213a;border-radius:var(--r);padding:12px}
+.notice p{margin:0 0 10px}
+table{width:100%;border-collapse:collapse} th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line);font-size:13px}
+th{color:var(--mute);font-weight:500;font-size:12px} td.num,th.num{text-align:right}
+.scroll{max-height:460px;overflow:auto}
+.hint{color:var(--mute);font-size:12px;line-height:1.5;margin:8px 0 0}
+.warnbox{border:1px solid var(--warn);background:#2a2110;color:#f3d28a;border-radius:8px;padding:10px 12px;font-size:12.5px;line-height:1.5}
+#toast{position:fixed;right:16px;bottom:16px;display:flex;flex-direction:column;gap:8px;z-index:20}
+#toast div{background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--accent);padding:10px 14px;border-radius:8px;max-width:360px}
+#toast div.error{border-left-color:var(--down)} #toast div.ok{border-left-color:var(--up)} #toast div.warn{border-left-color:var(--warn)}
+.modal{position:fixed;inset:0;background:#000a;display:none;align-items:center;justify-content:center;z-index:30}
+.modal.on{display:flex} .modal .box{background:var(--panel);border:1px solid var(--real);border-radius:12px;padding:20px;max-width:420px}
+details summary{cursor:pointer;color:var(--mute);font-size:12px;text-transform:uppercase;letter-spacing:.8px;margin-bottom:6px}
+.log{font-size:12px;color:var(--mute);max-height:120px;overflow:auto;margin-top:8px}
+.log div{padding:2px 0} .log .error{color:var(--down)} .log .ok{color:var(--up)} .log .warn{color:var(--warn)}
+.conn{max-width:520px;margin:20px auto}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">Deriv <span>Signal Desk</span></div>
+  <nav id="nav">
+    <button data-v="trade" class="on">Operar</button>
+    <button data-v="catalog">Catálogo</button>
+    <button data-v="history">Histórico</button>
+    <button data-v="conn">Conexão</button>
+  </nav>
+  <div class="sp"></div>
+  <span class="pill" title="Latência do WebSocket (ida e volta)"><span class="dot" id="dot"></span><span id="lat">—</span></span>
+  <span class="pill acct demo" id="acct" title="Clique para alternar demo/real"><span class="tag demo" id="acctTag">DEMO</span><b id="bal">—</b></span>
+</header>
+
+<main>
+<!-- OPERAR -->
+<section class="view on" id="v-trade">
+  <div class="grid">
+    <div>
+      <div class="card">
+        <div class="bar">
+          <select id="symbol">
+            <option value="R_100">Volatility 100</option><option value="R_75">Volatility 75</option>
+            <option value="R_50">Volatility 50</option><option value="R_25">Volatility 25</option><option value="R_10">Volatility 10</option>
+            <option value="frxEURUSD">EUR/USD</option><option value="frxGBPUSD">GBP/USD</option><option value="frxUSDJPY">USD/JPY</option>
+          </select>
+          <div class="seg" id="tf"><button data-tf="15m" class="on">15 min</button><button data-tf="1h">1 hora</button></div>
+          <span class="sp"></span>
+          <span class="tag" id="clock">—</span>
+        </div>
+        <div id="chart"></div>
+      </div>
+      <div id="openBox"></div>
+      <div class="card" style="margin-top:14px">
+        <h3>Registro</h3>
+        <div class="log" id="log"></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <h3>Sinal para a próxima vela</h3>
+        <div class="signal" id="signal"><div class="none">Aguardando confluência de padrões e indicadores…</div></div>
+      </div>
+
+      <div class="card" style="margin-top:14px">
+        <h3>Entrada</h3>
+        <label>Valor por operação</label>
+        <input type="number" id="stake" min="0.35" step="0.5" value="1">
+        <div class="row" style="margin-top:12px">
+          <button class="btn up" id="buyUp">COMPRA ▲</button>
+          <button class="btn down" id="buyDown">VENDA ▼</button>
+        </div>
+        <p class="hint">A operação encerra no fechamento da vela atual. Você pode sair antes.</p>
+      </div>
+
+      <div class="card" style="margin-top:14px">
+        <h3>Robô</h3>
+        <div class="seg" id="botMode" style="width:100%"><button data-m="auto" class="on" style="flex:1">Automático</button><button data-m="catalog" style="flex:1">Por catálogo</button></div>
+        <label>Probabilidade mínima para entrar (%)</label>
+        <div class="row"><input type="number" id="minConf" min="50" max="99" step="1" value="70"></div>
+        <details style="margin-top:12px"><summary>Limites de perda</summary>
+          <label>Perda máxima da sessão</label><input type="number" id="maxLoss" min="0" step="1" value="10">
+          <label>Perdas seguidas para parar</label><input type="number" id="maxConsec" min="0" step="1" value="3">
+          <label>Máximo de operações</label><input type="number" id="maxTrades" min="0" step="1" value="20">
+        </details>
+        <div style="margin-top:12px"><button class="btn primary" id="botBtn">Iniciar robô</button></div>
+        <div style="margin-top:10px">
+          <div class="stat"><span>Resultado da sessão</span><b id="sPnl">0.00</b></div>
+          <div class="stat"><span>Operações · ganhos</span><b id="sCnt">0 · 0</b></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CATÁLOGO -->
+<section class="view" id="v-catalog">
+  <div class="card">
+    <div class="bar">
+      <button class="btn primary" id="catBuild" style="width:auto">Atualizar catálogo</button>
+      <span class="tag" id="catSub">—</span>
+      <span class="sp"></span>
+      <label style="margin:0;display:flex;gap:6px;align-items:center"><input type="checkbox" id="catOnly" checked style="width:auto"> só validadas</label>
+    </div>
+    <div class="warnbox" id="catNote">
+      O catálogo busca no histórico combinações de hora, dia, padrão de vela e indicadores. Cada regra é achada com 70% dos dados e
+      <b>conferida nos 30% restantes</b>, com correção estatística para o número de regras testadas. Em índices sintéticos é normal que poucas ou nenhuma regra sobreviva — isso indica que não havia padrão real.
+    </div>
+    <div class="scroll" style="margin-top:12px">
+      <table><thead><tr><th>Condições</th><th>Direção</th><th class="num">Amostras (treino)</th><th class="num">Acerto treino</th><th class="num">Amostras (teste)</th><th class="num">Acerto fora da amostra</th><th class="num">p ajustado</th><th>Status</th></tr></thead>
+      <tbody id="catRows"><tr><td colspan="8" class="hint">Nenhum catálogo para este ativo/tempo. Clique em “Atualizar catálogo”.</td></tr></tbody></table>
+    </div>
+  </div>
+</section>
+
+<!-- HISTÓRICO -->
+<section class="view" id="v-history">
+  <div class="grid">
+    <div class="card"><h3>Operações</h3><div class="scroll">
+      <table><thead><tr><th>Hora</th><th>Conta</th><th>Lado</th><th class="num">Valor</th><th class="num">Resultado</th><th class="num">Latência</th><th class="num">Deslize</th></tr></thead>
+      <tbody id="hRows"></tbody></table></div></div>
+    <div class="card"><h3>Diagnóstico de execução</h3><div id="diag" class="hint">Sem operações ainda.</div></div>
+  </div>
+</section>
+
+<!-- CONEXÃO -->
+<section class="view" id="v-conn">
+  <div class="card conn">
+    <h3>Conexão com a Deriv</h3>
+    <label>App ID</label><input type="text" id="cAppId" placeholder="ex.: 12345">
+    <label>Token de acesso pessoal (PAT) da Deriv</label><input type="password" id="cToken" placeholder="token com escopo “trade”">
+    <label>Chave da API da Claude (opcional para o modo manual, obrigatória para os robôs)</label><input type="password" id="cClaude" placeholder="sk-ant-…">
+    <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="cRemember" style="width:auto"> Lembrar neste computador</label>
+    <div class="row" style="margin-top:14px"><button class="btn primary" id="cGo">Conectar</button><button class="btn ghost" id="cForget">Esquecer dados salvos</button></div>
+    <p class="hint">Crie o App ID e o token em developers.deriv.com. As chaves ficam só no servidor local (127.0.0.1) e nunca vão para o navegador depois de enviadas. Comece sempre pela conta demo.</p>
+  </div>
+</section>
+</main>
+
+<div class="modal" id="realModal"><div class="box">
+  <h3 style="color:var(--real);margin:0 0 8px">Conta com dinheiro real</h3>
+  <p id="realText" style="margin:0 0 14px;line-height:1.5"></p>
+  <div class="row"><button class="btn ghost" id="realNo">Cancelar</button><button class="btn stop" id="realYes">Confirmo, usar conta real</button></div>
+</div></div>
+<div id="toast"></div>
+
+<script src="/vendor/lightweight-charts.standalone.production.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+const fmt = (v, d = 2) => (v == null || Number.isNaN(+v) ? '—' : (+v).toFixed(d));
+const hhmm = t => new Date(t * 1000).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+let S = null, offset = 0, ws, acks = new Map(), seq = 1, realConfirmed = false;
+let candles = [], signal = null, open = null, trades = [];
+
+// ---------- WebSocket ----------
+function connect() {
+  ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onmessage = e => { const { type, data, id, ok, error } = JSON.parse(e.data); if (type === 'ack') { const a = acks.get(id); if (a) { acks.delete(id); ok ? a.res() : a.rej(new Error(error)); } } else on[type] && on[type](data); };
+  ws.onclose = () => { $('#dot').className = 'dot bad'; setTimeout(connect, 1500); };
+}
+function call(type, data) {
+  return new Promise((res, rej) => { const id = seq++; acks.set(id, { res, rej }); ws.send(JSON.stringify({ type, data, id })); })
+    .catch(e => { toast(e.message, 'error'); throw e; });
+}
+function toast(msg, kind = '') { const d = document.createElement('div'); d.className = kind; d.textContent = msg; $('#toast').append(d); setTimeout(() => d.remove(), 5000); }
+
+// ---------- Gráfico ----------
+const chart = LightweightCharts.createChart($('#chart'), {
+  layout: { background: { color: '#151a22' }, textColor: '#8a94a6' },
+  grid: { vertLines: { color: '#1d2430' }, horzLines: { color: '#1d2430' } },
+  rightPriceScale: { borderColor: '#252d3a' },
+  timeScale: { borderColor: '#252d3a', timeVisible: true, secondsVisible: false, rightOffset: 6,
+    tickMarkFormatter: t => new Date(t * 1000).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) },
+  localization: { timeFormatter: t => new Date(t * 1000).toLocaleString('pt-BR') },
+  crosshair: { mode: 0 },
+});
+const series = chart.addCandlestickSeries({ upColor: '#26a69a', downColor: '#ef5350', borderVisible: false, wickUpColor: '#26a69a', wickDownColor: '#ef5350' });
+new ResizeObserver(() => chart.applyOptions({ width: $('#chart').clientWidth })).observe($('#chart'));
+let priceLine = null;
+
+function drawMarkers() {
+  const m = [];
+  if (signal && now() < signal.expiresAt) {
+    const up = signal.direction === 'CALL';
+    m.push({ time: signal.candleOpen, position: up ? 'belowBar' : 'aboveBar', color: up ? '#26a69a' : '#ef5350', shape: up ? 'arrowUp' : 'arrowDown',
+      text: (up ? 'COMPRA' : 'VENDA') + (signal.confidence != null ? ' ' + Math.round(signal.confidence * 100) + '%' : '') });
+  }
+  if (open) {
+    const up = open.direction === 'CALL';
+    m.push({ time: open.candleOpen, position: 'inBar', color: '#4c8dff', shape: 'circle', text: 'ENTRADA ' + (up ? '▲' : '▼') });
+  }
+  m.sort((a, b) => a.time - b.time);
+  series.setMarkers(m);
+  if (priceLine) { series.removePriceLine(priceLine); priceLine = null; }
+  if (open && open.entrySpot) priceLine = series.createPriceLine({ price: open.entrySpot, color: '#4c8dff', lineWidth: 1, lineStyle: 2, title: 'entrada' });
+}
+
+// ---------- Eventos do servidor ----------
+const on = {
+  state(s) {
+    S = s; offset = s.serverNow - Date.now() / 1000;
+    $('#dot').className = 'dot ' + (s.connected ? 'ok' : 'bad');
+    $('#lat').textContent = s.latency != null ? s.latency + ' ms' : '—';
+    if (s.account) {
+      const demo = s.account.type === 'demo';
+      $('#acct').className = 'pill acct ' + (demo ? 'demo' : 'real');
+      $('#acctTag').className = 'tag ' + (demo ? 'demo' : 'real'); $('#acctTag').textContent = demo ? 'DEMO' : 'REAL';
+      $('#bal').textContent = fmt(s.account.balance) + ' ' + s.account.currency;
+    }
+    $('#symbol').value = s.symbol;
+    document.querySelectorAll('#tf button').forEach(b => b.classList.toggle('on', b.dataset.tf === s.tf));
+    document.querySelectorAll('#botMode button').forEach(b => b.classList.toggle('on', b.dataset.m === (s.running ? s.mode : $('#botMode').dataset.sel || 'auto')));
+    for (const [id, k] of [['stake', 'stake'], ['minConf', 'minConfidence'], ['maxLoss', 'maxLoss'], ['maxConsec', 'maxConsecLosses'], ['maxTrades', 'maxTrades']])
+      if (document.activeElement !== $('#' + id)) $('#' + id).value = id === 'minConf' ? Math.round(s.cfg[k] * 100) : s.cfg[k];
+    $('#botBtn').textContent = s.running ? 'Parar robô' : 'Iniciar robô'; $('#botBtn').className = 'btn ' + (s.running ? 'stop' : 'primary');
+    const ss = s.session; $('#sPnl').textContent = fmt(ss.pnl); $('#sPnl').className = ss.pnl > 0 ? 'pos' : ss.pnl < 0 ? 'neg' : '';
+    $('#sCnt').textContent = `${ss.trades} · ${ss.wins}`;
+    $('#buyUp').disabled = $('#buyDown').disabled = !s.connected || !!s.open;
+    if (s.open) { open = s.open; } else if (open && !s.open) { open = null; }
+    renderOpen(); renderSignal(); renderCatalogSub();
+    if (!s.connected) switchView('conn');
+  },
+  candles(d) { candles = d.candles; series.setData(candles.map(c => ({ time: c.epoch, open: c.open, high: c.high, low: c.low, close: c.close }))); chart.timeScale().scrollToRealTime(); drawMarkers(); },
+  candle(c) { series.update({ time: c.epoch, open: c.open, high: c.high, low: c.low, close: c.close }); },
+  signal(s) { signal = s; renderSignal(); drawMarkers(); if (s) toast(`Sinal ${s.direction === 'CALL' ? 'de COMPRA' : 'de VENDA'}${s.confidence != null ? ' · ' + Math.round(s.confidence * 100) + '%' : ''}`, s.direction === 'CALL' ? 'ok' : 'warn'); },
+  trade_open(o) { open = o; renderOpen(); drawMarkers(); },
+  trade_update(o) { open = o; renderOpen(); drawMarkers(); },
+  trade_closed(t) { open = null; trades.push(t); renderOpen(); drawMarkers(); renderTrades(); toast(`${t.win ? 'Ganhou' : 'Perdeu'} ${fmt(t.profit)}`, t.win ? 'ok' : 'warn'); },
+  log(l) { const d = document.createElement('div'); d.className = l.level; d.textContent = new Date(l.t).toLocaleTimeString('pt-BR') + '  ' + l.msg; $('#log').prepend(d); },
+  alert(a) { toast('Robô parado: ' + a.reason, 'warn'); },
+  catalog_progress(p) { $('#catSub').textContent = `baixando histórico… ${p.candles} velas`; },
+  catalog(c) { renderCatalog(c); },
+  diagnostics(d) { renderDiag(d); },
+  saved(d) { if (d.hasSaved) $('#cRemember').checked = true; },
+};
+
+// ---------- Renderização ----------
+function now() { return Date.now() / 1000 + offset; }
+function renderSignal() {
+  const el = $('#signal');
+  if (!signal || now() >= signal.expiresAt) { el.className = 'signal'; el.innerHTML = '<div class="none">Aguardando confluência de padrões e indicadores…</div>'; return; }
+  const up = signal.direction === 'CALL', left = Math.max(0, Math.round(signal.expiresAt - now()));
+  const total = Math.max(1, signal.expiresAt - signal.candleOpen);
+  el.className = 'signal ' + (up ? 'call' : 'put');
+  el.innerHTML = `<div class="dir">${up ? 'COMPRA ▲' : 'VENDA ▼'}</div>
+    <div class="meta">${signal.confidence != null ? 'Probabilidade estimada pela Claude: <b>' + Math.round(signal.confidence * 100) + '%</b>' : 'Sem validação da Claude (chave não configurada)'}</div>
+    <div class="meta">${esc(signal.reason || '')}</div>
+    ${signal.rule ? `<div class="meta">Catálogo: ${(signal.rule.rate * 100).toFixed(0)}% fora da amostra (${signal.rule.n} casos)</div>` : ''}
+    <div class="meta">Entrar nos próximos <b>${left}s</b></div>
+    <div class="meter"><i style="width:${(left / total) * 100}%"></i></div>`;
+}
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+let holdChoice = null, openKey = '';
+function renderOpen() {
+  const box = $('#openBox');
+  if (!open) { box.innerHTML = ''; holdChoice = null; openKey = ''; return; }
+  const key = open.id + '|' + !!holdChoice;
+  if (key !== openKey) {
+    openKey = key;
+    box.innerHTML = `<div class="notice">
+      <p><b id="oDir"></b> aberta · <span id="oStake"></span> · fecha em <b id="oLeft"></b> · resultado atual <b id="oPnl"></b></p>
+      ${holdChoice ? '<p class="hint" style="margin:0 0 8px">Aguardando o fechamento da vela.</p>' : '<p>Aguardar o fechamento da vela ou sair agora?</p>'}
+      <div class="row">${holdChoice ? '' : '<button class="btn ghost" id="hold">Aguardar fechar</button>'}<button class="btn stop" id="sellNow">Sair agora</button></div>
+    </div>`;
+    const h = $('#hold'); if (h) h.onclick = () => { holdChoice = 'hold'; renderOpen(); };
+    $('#sellNow').onclick = () => call('sell').catch(() => {});
+  }
+  const left = Math.max(0, Math.round(open.expiry - now()));
+  $('#oDir').textContent = open.direction === 'CALL' ? 'COMPRA ▲' : 'VENDA ▼';
+  $('#oStake').textContent = fmt(open.stake);
+  $('#oLeft').textContent = Math.floor(left / 60) + 'm ' + String(left % 60).padStart(2, '0') + 's';
+  const pr = open.profit; $('#oPnl').textContent = fmt(pr); $('#oPnl').className = pr > 0 ? 'pos' : pr < 0 ? 'neg' : '';
+  $('#sellNow').disabled = open.canSell === false;
+}
+
+function renderTrades() {
+  $('#hRows').innerHTML = trades.slice(-100).reverse().map(t => `<tr><td>${new Date(t.closedAt).toLocaleString('pt-BR')}</td>
+    <td><span class="tag ${t.accountType}">${t.accountType === 'demo' ? 'DEMO' : 'REAL'}</span></td><td>${t.direction === 'CALL' ? '▲ compra' : '▼ venda'}</td>
+    <td class="num">${fmt(t.stake)}</td><td class="num ${t.profit > 0 ? 'pos' : 'neg'}">${fmt(t.profit)}</td>
+    <td class="num">${t.lat ? t.lat.totalMs + ' ms' : '—'}</td><td class="num ${t.slip < 0 ? 'neg' : 'pos'}">${t.slip != null ? fmt(t.slip, 3) : '—'}</td></tr>`).join('');
+}
+function renderDiag(d) {
+  if (!d.n) { $('#diag').textContent = 'Sem operações ainda.'; return; }
+  const sig = Math.abs(d.z) >= 2;
+  $('#diag').innerHTML = `
+    <div class="stat"><span>Operações</span><b>${d.n}</b></div>
+    <div class="stat"><span>Taxa de acerto</span><b>${(d.winRate * 100).toFixed(1)}%</b></div>
+    <div class="stat"><span>Acerto necessário p/ empatar (payout)</span><b>${(d.breakEven * 100).toFixed(1)}%</b></div>
+    <div class="stat"><span>Resultado acumulado</span><b class="${d.pnl >= 0 ? 'pos' : 'neg'}">${fmt(d.pnl)}</b></div>
+    <div class="stat"><span>Latência média sinal→compra</span><b>${fmt(d.avgTotalMs, 0)} ms</b></div>
+    <div class="stat"><span>Ping médio</span><b>${fmt(d.avgPingMs, 0)} ms</b></div>
+    <div class="stat"><span>Deslize adverso (preço andou contra)</span><b>${d.adverseShare != null ? (d.adverseShare * 100).toFixed(0) + '%' : '—'}</b></div>
+    <p class="hint">${d.n < 100 ? 'Amostra pequena: com menos de ~100 operações, acerto e deslize variam por pura sorte e não provam nada — nem a favor do robô, nem contra a plataforma.' : sig ? (d.z > 0 ? 'Acerto acima do ponto de empate com significância estatística.' : 'Acerto abaixo do ponto de empate com significância estatística: a estratégia está perdendo dinheiro de forma consistente.') : 'Diferença para o ponto de empate sem significância estatística.'}</p>`;
+}
+let catalogData = null;
+function renderCatalogSub() {
+  $('#catSub').textContent = S && S.catalog ? `${S.catalog.candles} velas · ${S.catalog.rulesTested} regras testadas · ${S.catalog.validated} validadas` : 'sem catálogo';
+}
+function renderCatalog(c) {
+  catalogData = c;
+  const only = $('#catOnly').checked;
+  const rows = c.rules.filter(r => !only || r.validated);
+  $('#catRows').innerHTML = rows.length ? rows.map(r => `<tr><td>${esc(r.key.replaceAll('&', ' + '))}</td><td>${r.direction === 'CALL' ? '▲ compra' : '▼ venda'}</td>
+    <td class="num">${r.trainN}</td><td class="num">${(r.trainRate * 100).toFixed(1)}%</td><td class="num">${r.testN}</td><td class="num"><b>${(r.testRate * 100).toFixed(1)}%</b></td>
+    <td class="num">${r.pAdj < 0.001 ? '<0.001' : r.pAdj.toFixed(3)}</td><td>${r.validated ? '<span class="pos">validada</span>' : '<span style="color:var(--mute)">não confirmada</span>'}</td></tr>`).join('')
+    : `<tr><td colspan="8" class="hint">Nenhuma regra sobreviveu à validação fora da amostra (${c.rulesTested} combinações testadas em ${c.candles} velas). Isso é um resultado legítimo: sugere que não há padrão explorável nesse ativo/tempo.</td></tr>`;
+  $('#catBuild').disabled = false; $('#catBuild').textContent = 'Atualizar catálogo';
+  renderCatalogSub();
+}
+
+// ---------- Ações ----------
+document.querySelectorAll('#nav button').forEach(b => b.onclick = () => switchView(b.dataset.v));
+function switchView(v) {
+  document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
+  document.querySelectorAll('.view').forEach(x => x.classList.toggle('on', x.id === 'v-' + v));
+  if (v === 'trade') chart.applyOptions({ width: $('#chart').clientWidth });
+}
+$('#symbol').onchange = () => call('market', { symbol: $('#symbol').value, tf: S.tf }).catch(() => $('#symbol').value = S.symbol);
+document.querySelectorAll('#tf button').forEach(b => b.onclick = () => call('market', { symbol: S.symbol, tf: b.dataset.tf }).catch(() => {}));
+document.querySelectorAll('#botMode button').forEach(b => b.onclick = () => { $('#botMode').dataset.sel = b.dataset.m; document.querySelectorAll('#botMode button').forEach(x => x.classList.toggle('on', x === b)); });
+const sendCfg = () => call('config', { stake: $('#stake').value, minConfidence: $('#minConf').value / 100, maxLoss: $('#maxLoss').value, maxConsecLosses: $('#maxConsec').value, maxTrades: $('#maxTrades').value }).catch(() => {});
+['stake', 'minConf', 'maxLoss', 'maxConsec', 'maxTrades'].forEach(id => $('#' + id).onchange = sendCfg);
+
+function confirmModal(text) {
+  return new Promise(res => {
+    $('#realText').textContent = text; $('#realModal').classList.add('on');
+    $('#realYes').onclick = () => { $('#realModal').classList.remove('on'); res(true); };
+    $('#realNo').onclick = () => { $('#realModal').classList.remove('on'); res(false); };
+  });
+}
+// Em conta real exige confirmação; em demo devolve true sem perguntar. false = cancelou.
+async function needReal(text) {
+  if (!S || !S.account || S.account.type !== 'real') return true;
+  return confirmModal(text);
+}
+$('#acct').onclick = async () => {
+  if (!S || !S.accounts.length) return;
+  const target = S.accounts.find(a => a.type !== S.account.type);
+  if (!target) return toast('Só há uma conta disponível', 'warn');
+  if (target.type === 'real' && !(await confirmModal(`Você vai trocar para a conta REAL ${target.id}. As operações usarão dinheiro de verdade.`))) return;
+  call('select_account', { id: target.id, confirmReal: target.type === 'real' }).catch(() => {});
+};
+async function buy(dir) {
+  await sendCfg();
+  if (!(await needReal(`Enviar ordem de ${dir === 'CALL' ? 'COMPRA' : 'VENDA'} de ${$('#stake').value} com dinheiro REAL?`))) return;
+  call('buy', { direction: dir, confirmReal: true }).catch(() => {});
+}
+$('#buyUp').onclick = () => buy('CALL'); $('#buyDown').onclick = () => buy('PUT');
+$('#botBtn').onclick = async () => {
+  if (S.running) return call('stop').catch(() => {});
+  await sendCfg();
+  if (!(await needReal('O robô vai abrir operações sozinho com dinheiro REAL, respeitando os limites de perda configurados. Continuar?'))) return;
+  call('start', { mode: $('#botMode').dataset.sel || 'auto', confirmReal: true }).catch(() => {});
+};
+$('#catBuild').onclick = () => { $('#catBuild').disabled = true; $('#catBuild').textContent = 'Analisando…'; call('catalog_build', { pages: 4 }).catch(() => { $('#catBuild').disabled = false; $('#catBuild').textContent = 'Atualizar catálogo'; }); };
+$('#catOnly').onchange = () => catalogData && renderCatalog(catalogData);
+$('#cGo').onclick = async () => { $('#cGo').disabled = true; try { await call('connect', { appId: $('#cAppId').value.trim(), token: $('#cToken').value.trim(), anthropicKey: $('#cClaude').value.trim(), remember: $('#cRemember').checked }); $('#cToken').value = ''; $('#cClaude').value = ''; switchView('trade'); toast('Conectado', 'ok'); } catch {} $('#cGo').disabled = false; };
+$('#cForget').onclick = () => call('forget').then(() => toast('Dados salvos removidos', 'ok')).catch(() => {});
+fetch('/api/trades').then(r => r.json()).then(t => { trades = t; renderTrades(); }).catch(() => {});
+
+setInterval(() => { renderSignal(); if (open) renderOpen(); if (signal && now() >= signal.expiresAt) drawMarkers(); $('#clock').textContent = new Date(now() * 1000).toLocaleTimeString('pt-BR'); }, 1000);
+connect();
+</script>
+</body>
+</html>
