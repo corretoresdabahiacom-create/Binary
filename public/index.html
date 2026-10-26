@@ -90,7 +90,7 @@ details summary{cursor:pointer;color:var(--mute);font-size:12px;text-transform:u
   <div class="brand">Trade AI <span>Core</span></div>
   <nav id="nav">
     <button data-v="trade" class="on">Painel</button>
-    <button data-v="catalog">Catálogo</button>
+    <button data-v="catalog" style="display:none">Catálogo</button>
     <button data-v="history">Histórico</button>
     <button data-v="conn">Conexão</button>
   </nav>
@@ -107,9 +107,7 @@ details summary{cursor:pointer;color:var(--mute);font-size:12px;text-transform:u
       <div class="card">
         <div class="bar">
           <select id="symbol">
-            <option value="R_100">Volatility 100</option><option value="R_75">Volatility 75</option>
-            <option value="R_50">Volatility 50</option><option value="R_25">Volatility 25</option><option value="R_10">Volatility 10</option>
-            <option value="frxEURUSD">EUR/USD</option><option value="frxGBPUSD">GBP/USD</option><option value="frxUSDJPY">USD/JPY</option>
+            <option value="frxEURUSD">EUR/USD</option><option value="frxGBPUSD">GBP/USD</option><option value="frxUSDJPY">USD/JPY</option><option value="frxAUDUSD">AUD/USD</option><option value="frxUSDCAD">USD/CAD</option><option value="frxUSDCHF">USD/CHF</option><option value="frxNZDUSD">NZD/USD</option><option value="frxEURGBP">EUR/GBP</option><option value="frxEURJPY">EUR/JPY</option><option value="frxGBPJPY">GBP/JPY</option>
           </select>
           <div class="seg" id="tf"><button data-tf="5m" class="on">5 min</button><button data-tf="15m">15 min</button><button data-tf="1h">1 hora</button></div>
           <span class="sp"></span>
@@ -133,6 +131,8 @@ details summary{cursor:pointer;color:var(--mute);font-size:12px;text-transform:u
     <div>
       <div class="card">
         <div class="big wait" id="big"><div class="t">AGUARDAR</div><div class="s">Carregando…</div></div>
+        <div class="row" style="gap:8px;margin-bottom:8px"><button class="btn up" id="inCall">Entrei CALL ▲</button><button class="btn down" id="inPut">Entrei PUT ▼</button></div>
+        <div id="posBox"></div>
         <div class="warnbox" id="modeBanner" style="margin-bottom:10px">MODO SÓ ANÁLISE — o app não envia ordens. Você decide e opera manualmente na corretora.</div>
         <h3>Probabilidade ao vivo</h3>
         <div id="prob" class="hint">Carregando histórico da Deriv para o modelo…</div>
@@ -345,6 +345,7 @@ const on = {
     $('#dTick').textContent = s.tickLatencyMs == null ? '—' : s.tickLatencyMs + ' ms';
     $('#dModel').textContent = s.model ? `${s.model.samples} amostras · ${s.model.horizon} vela(s)` : 'indisponível';
     for (const [id, k, f] of [['minProb', 'minProb', 100], ['minSamples', 'minSamples', 1]]) if (document.activeElement !== $('#' + id)) $('#' + id).value = Math.round(s.cfg[k] * f);
+    position = s.position; renderPos();
     if (s.prob) renderProb(s.prob);
     $('#dPrice').textContent = s.lastPrice == null ? '—' : (+s.lastPrice).toFixed(5);
     $('#dBlock').textContent = s.blockReason ? 'Sinais suspensos: ' + s.blockReason : '';
@@ -356,6 +357,7 @@ const on = {
   prob(p) { renderProb(p); },
   opportunity(o) { onOpportunity(o); loadSignals(); },
   scan(l) { renderScan(l); },
+  position(p) { position = p; renderPos(); renderBig(); },
   research() { loadResearch(); },
   notify(n) { notifyUser(n); loadSignals(); },
   signal(s) { signal = s && s.status === 'valido' ? s : null; renderBig(); renderSignal(); drawMarkers(); if (s && s.status === 'valido') toast(`Sinal ${s.direction === 'CALL' ? 'de COMPRA' : 'de VENDA'}${s.confidence != null ? ' · ' + Math.round(s.confidence * 100) + '%' : ''}`, s.direction === 'CALL' ? 'ok' : 'warn'); },
@@ -387,7 +389,20 @@ function renderProb(p) {
     <div>Horizonte: ${p.horizon} vela(s) · estimativa estatística do histórico, não garantia.</div>`;
 }
 let lastProb = null;
+let position = null;
+function renderPos() {
+  const el = $('#posBox'); if (!position) { el.innerHTML = ''; return; }
+  const p = position, left = Math.max(0, Math.round(p.expiresAt - now())), ab = p.status === 'ABANDONAR';
+  el.innerHTML = `<div class="card" style="margin-bottom:10px;border:2px solid ${ab ? '#ef5350' : '#26a69a'}">
+    <div style="font-size:${ab ? 26 : 18}px;font-weight:900;color:${ab ? '#ef5350' : '#26a69a'}">${ab ? '✕ ABANDONAR A OPERAÇÃO' : '✓ MANTER'}</div>
+    <div class="hint">${p.direction} ${esc(p.symbol)} · entrada ${p.entryPrice} · agora ${p.price} · termina em ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}</div>
+    <div class="hint">${esc(p.reason || '')}</div>
+    <div class="hint">Regra de abandono não comprovada em backtest; o valor de venda antecipada é o que a Deriv oferecer.</div>
+    <button class="btn ghost" id="posClr" style="margin-top:6px">Encerrar acompanhamento</button></div>`;
+  $('#posClr').onclick = () => call('position_clear').catch(() => {});
+}
 function renderBig() {
+  if (position && position.status === 'ABANDONAR') { const b = $('#big'); b.className = 'big put'; b.innerHTML = `<div class="t">ABANDONAR ✕</div><div class="s">${esc(position.direction)} ${esc(position.symbol)} — ${esc(position.reason)}</div>`; return; }
   const el = $('#big'), t = now(), mmss = x => { x = Math.max(0, Math.round(x)); return Math.floor(x / 60) + ':' + String(x % 60).padStart(2, '0'); };
   const pct = x => (x * 100).toFixed(1) + '%';
   if (signal && signal.status === 'valido' && t < signal.expiresAt) {
@@ -587,7 +602,7 @@ $('#cGo').onclick = async () => { $('#cGo').disabled = true; try { await call('c
 $('#cForget').onclick = () => call('forget').then(() => toast('Dados salvos removidos', 'ok')).catch(() => {});
 fetch('/api/trades').then(r => r.json()).then(t => { trades = t; renderTrades(); }).catch(() => {});
 
-setInterval(() => { renderBig(); renderSignal(); if (open) renderOpen(); if (signal && now() >= signal.expiresAt) drawMarkers(); if (ageBase != null) $('#dAge').textContent = ((Date.now() - ageBase) / 1000).toFixed(1) + ' s'; $('#clock').textContent = new Date(now() * 1000).toLocaleTimeString('pt-BR'); }, 1000);
+setInterval(() => { renderBig(); if (position) renderPos(); renderSignal(); if (open) renderOpen(); if (signal && now() >= signal.expiresAt) drawMarkers(); if (ageBase != null) $('#dAge').textContent = ((Date.now() - ageBase) / 1000).toFixed(1) + ' s'; $('#clock').textContent = new Date(now() * 1000).toLocaleTimeString('pt-BR'); }, 1000);
 connect();
 document.querySelectorAll('#exp button').forEach(b => b.onclick = () => call('config', { expiryMin: +b.dataset.e }).catch(() => {}));
 $('#minProb').onchange = () => call('config', { minProb: +$('#minProb').value / 100 }).catch(() => {});
@@ -596,6 +611,8 @@ $('#maxAge').onchange = () => call('config', { maxDataAgeSec: +$('#maxAge').valu
 $('#nOn').onchange = () => { if ($('#nOn').checked && 'Notification' in window && Notification.permission === 'default') Notification.requestPermission(); };
 document.addEventListener('click', () => { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission(); }, { once: true });
 loadSignals(); setInterval(loadSignals, 30000); loadResearch(); setInterval(loadResearch, 60000);
+$('#inCall').onclick = () => call('entered', { direction: 'CALL' }).catch(() => {});
+$('#inPut').onclick = () => call('entered', { direction: 'PUT' }).catch(() => {});
 $('#rsRun').onclick = () => call('research_run').then(() => toast('Backtest v2 iniciado — leva alguns minutos', 'ok')).catch(() => {});
 $('#edgeMargin').onchange = () => call('config', { edgeMargin: +$('#edgeMargin').value / 100 }).catch(() => {});
 $('#allowUn').onchange = () => call('config', { allowUnapproved: $('#allowUn').checked ? 1 : 0 }).catch(() => {});

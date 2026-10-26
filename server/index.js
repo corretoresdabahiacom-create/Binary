@@ -55,7 +55,7 @@ const wss = new WebSocketServer({
 const clients = new Set();
 const bcast = (type, data) => { const s = JSON.stringify({ type, data }); for (const c of clients) if (c.readyState === 1) c.send(s); };
 
-for (const ev of ['state', 'candles', 'candle', 'signal', 'trade_open', 'trade_update', 'trade_closed', 'log', 'alert', 'catalog_progress', 'catalog', 'notify', 'prob'])
+for (const ev of ['state', 'candles', 'candle', 'signal', 'trade_open', 'trade_update', 'trade_closed', 'log', 'alert', 'catalog_progress', 'catalog', 'notify', 'prob', 'position'])
   engine.on(ev, d => bcast(ev, d));
 engine.on('trade_closed', () => bcast('diagnostics', engine.diagnostics()));
 if (scanner) {
@@ -96,6 +96,8 @@ const handlers = {
     if (acc && acc.account_type === 'real' && !d.confirmReal) throw new Error('confirme que deseja operar com dinheiro REAL');
     await engine.selectAccount(d.id);
   },
+  async entered(d) { engine.markEntry(d.direction); },
+  async position_clear() { engine.clearPosition(); },
   async market(d) { await engine.setMarket(d.symbol, d.tf); },
   // Vai para a oportunidade indicada pelo scanner: ativo + gráfico + expiração.
   async goto(d) {

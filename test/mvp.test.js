@@ -181,3 +181,24 @@ test('probabilidade ao vivo: dado atrasado mantém AGUARDAR mesmo com probabilid
     assert.strictEqual(e.prob.stage, 'preliminar');
   } finally { done(e); }
 });
+
+test('acompanhamento: MANTER a favor; ABANDONAR quando vira contra e o modelo inverte; fim na expiração', async () => {
+  const { e } = await engineWithMock();
+  const notes = []; e.on('notify', n => notes.push(n));
+  try {
+    await e.startPublic(); e._histKey = 'x';
+    let p = 100; const t0 = e.candles[0].epoch;
+    e.candles = Array.from({ length: 500 }, (_, i) => { const o = p; p += (i % 7 === 3 ? -0.4 : 1); return { epoch: t0 + i * 300, open: o, high: Math.max(o, p) + .1, low: Math.min(o, p) - .1, close: p }; });
+    e.hist = e.candles.slice(0, -1); e.rebuildModel();
+    e.markEntry('PUT');                                    // contra a tendência forte do modelo
+    const ps = e.position; assert.strictEqual(ps.status, 'MANTER');
+    const last = e.candles.at(-1);
+    e.candles[e.candles.length - 1] = { ...last, close: last.close + 5, high: last.close + 5 }; // preço sobe: contra o PUT
+    e._watchPosition(true);
+    assert.strictEqual(e.position.status, 'ABANDONAR');
+    assert.ok(notes.some(n => n.kind === 'abandonar'));
+    e.position.expiresAt = e.now() - 1; e._watchPosition(true);
+    assert.strictEqual(e.position, null);
+    assert.ok(notes.some(n => n.kind === 'fim' && /desfavorável/.test(n.text)));
+  } finally { done(e); }
+});

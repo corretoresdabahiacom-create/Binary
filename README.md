@@ -6,7 +6,8 @@ Monitor de mercado para **decisão manual**: o app mostra o gráfico, emite CALL
 
 **Como rodar no Windows:** instale Node.js 20+ (nodejs.org), descompacte o ZIP, dê dois cliques em `iniciar.bat`. Abre em http://localhost:3010. Nenhum token é necessário para o MVP.
 
-**O que o MVP faz**
+**O que o MVP faz** (foco em **forex**: 10 pares no scanner; índices Volatility retirados por não terem vantagem possível — são gerados por sorteio)
+- **Acompanhamento da entrada:** botões “Entrei CALL/PUT” (nenhuma ordem é enviada). O app avisa **ABANDONAR** se o preço virar contra a entrada por mais de 0,5×ATR e o modelo cair abaixo de 45% para a sua direção, com ≥20% do tempo restante; senão **MANTER**. Regra não comprovada em backtest.
 - Dados da **API oficial da Deriv** (WebSocket público), índices sintéticos (Volatility). Fonte identificada na tela.
 - Gráfico de velas **5 min / 15 min / 1 h**; **expiração 5 ou 15 min** escolhida à parte do timeframe.
 - **Diagnóstico da fonte:** estado (OK / DESATUALIZADO / DESCONECTADO), idade do último dado, último preço.
@@ -35,7 +36,7 @@ Monitor de mercado para **decisão manual**: o app mostra o gráfico, emite CALL
 - **Celular:** sem push. Acesso remoto só via túnel (ver seção Cloudflare abaixo); o monitor depende do PC ligado.
 - Sinais vêm de regras de indicadores (`indicadores-v1`) sem vantagem comprovada. Nada aqui é promessa de lucro ou taxa de acerto.
 
-**Testes:** `npm test` (36 testes; usam um servidor Deriv **simulado** — validam a lógica, não a integração real).
+**Testes:** `npm test` (37 testes; usam um servidor Deriv **simulado** — validam a lógica, não a integração real).
 
 ---
 

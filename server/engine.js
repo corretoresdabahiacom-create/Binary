@@ -3,7 +3,7 @@ const EventEmitter = require('events');
 const fs = require('fs');
 const path = require('path');
 const deriv = require('./deriv');
-const { computeSeries, snapshot, localScore } = require('./indicators');
+const { computeSeries, snapshot, localScore, atr } = require('./indicators');
 const { askClaude } = require('./claude');
 const catalogLib = require('./catalog');
 const prob = require('./probability');
@@ -24,7 +24,7 @@ class Engine extends EventEmitter {
     this.account = null;          // { account_id, account_type, currency, balance }
     this.pub = null;              // socket público (velas)
     this.trade = null;            // socket de negociação da conta ativa
-    this.symbol = 'R_100';
+    this.symbol = 'frxEURUSD';
     this.tf = '5m';
     this.candles = [];
     this.subId = null;
@@ -36,6 +36,7 @@ class Engine extends EventEmitter {
     this.model = null;            // tabela de probabilidade
     this.prob = null;             // estimativa ao vivo
     this.tickLatencyMs = null;
+    this.position = null;         // entrada MANUAL marcada pelo usuário (o app não envia ordens)
     this._histKey = null;
     this.tradingEnabled = process.env.TRADING_ENABLED === '1'; // MVP: só análise, sem ordens
     this.lastTickAt = null;       // hora local do último dado recebido
@@ -73,11 +74,11 @@ class Engine extends EventEmitter {
       feedDelayMs: this.feedDelayMs, serverNow: this.now(),
       catalog: this.catalog && { validated: this.catalog.validated, rulesTested: this.catalog.rulesTested, candles: this.catalog.candles, createdAt: this.catalog.createdAt },
       hasClaude: !!process.env.ANTHROPIC_API_KEY,
-      tradingEnabled: this.tradingEnabled, source: SOURCE, market: 'sintético Deriv (não OTC)',
+      tradingEnabled: this.tradingEnabled, source: SOURCE, market: 'forex Deriv (não OTC)',
       dataState: this.dataState, blockReason: this.blockReason,
       dataAgeMs: this.lastTickAt ? Date.now() - this.lastTickAt : null,
       lastPrice: this.candles.length ? this.candles[this.candles.length - 1].close : null,
-      expiries: EXPIRIES, tfs: Object.keys(GRANS), prob: this.prob, tickLatencyMs: this.tickLatencyMs,
+      position: this.position, expiries: EXPIRIES, tfs: Object.keys(GRANS), prob: this.prob, tickLatencyMs: this.tickLatencyMs,
       model: this.model && { name: this.model.model, horizon: this.model.horizon, samples: this.model.samples, ties: this.model.ties, from: this.model.from, to: this.model.to },
       open: this.open && this._openView(),
       signal: this.signal,
@@ -206,6 +207,61 @@ class Engine extends EventEmitter {
     this.emit('prob', this.prob);
   }
 
+  // ---------- acompanhamento da entrada manual ----------
+  markEntry(direction) {
+    if (!['CALL', 'PUT'].includes(direction)) throw new Error('direção inválida');
+    const c = this.candles.at(-1); if (!c) throw new Error('sem dados');
+    const t = this.now();
+    this.position = { direction, symbol: this.symbol, tf: this.tf, expiryMin: this.cfg.expiryMin, entryPrice: c.close, entryAt: t,
+      expiresAt: t + this.cfg.expiryMin * 60, status: 'MANTER', reason: 'operação acompanhada', price: c.close };
+    this.log(`Entrada marcada: ${direction} ${this.symbol} a ${c.close} · exp. ${this.cfg.expiryMin} min`, 'ok');
+    this._watchPosition(true); this.push();
+  }
+  clearPosition() { this.position = null; this.push(); }
+
+  // Regra de abandono (não comprovada em backtest; o valor de venda antecipada depende da oferta da Deriv):
+  // ABANDONAR quando o preço está contra a entrada por > 0,5×ATR E o modelo dá < 45% para a direção da entrada
+  // E ainda resta ≥ 20% do tempo. Fora isso, MANTER.
+  _watchPosition(force = false) {
+    const ps = this.position; if (!ps) return;
+    if (ps.symbol !== this.symbol || ps.tf !== this.tf) { ps.reason = 'abra o mesmo mercado no painel para acompanhar'; return; }
+    const nowMs = Date.now();
+    if (!force && this._lastPos && nowMs - this._lastPos < 1000) return;
+    this._lastPos = nowMs;
+    const t = this.now(), i = this.candles.length - 1, price = this.candles[i].close;
+    ps.price = price;
+    const sgn = ps.direction === 'CALL' ? 1 : -1, move = (price - ps.entryPrice) * sgn;
+    if (t >= ps.expiresAt) {
+      const res = move > 0 ? 'favorável' : move < 0 ? 'desfavorável' : 'empate';
+      this.log(`Operação ${ps.direction} encerrou: ${res} (entrada ${ps.entryPrice} → ${price})`, move > 0 ? 'ok' : 'warn');
+      this.emit('notify', { kind: 'fim', text: `Operação ${ps.direction} ${this.symbol} encerrou: ${res}` });
+      this.position = null; this.push(); return;
+    }
+    const a = atr(this.candles.slice(-60), 14).at(-1) || 0;
+    let pDir = null;
+    if (this.model) {
+      const e = prob.estimate(this.model, this.candles, i, this.cfg.minSamples);
+      if (e) {
+        const art = research.artifact(this.symbol, this.tf, this.cfg.expiryMin);
+        const pc = research.applyIsotonic(art && art.iso, e.pCall);
+        pDir = ps.direction === 'CALL' ? pc : 1 - pc;
+      }
+    }
+    const left = (ps.expiresAt - t) / (ps.expiresAt - ps.entryAt);
+    const prev = ps.status;
+    ps.pDir = pDir; ps.move = move; ps.atr = a;
+    if (move < -0.5 * a && pDir != null && pDir < 0.45 && left >= 0.2) {
+      ps.status = 'ABANDONAR';
+      ps.reason = `preço contra a entrada (${(move / (a || 1)).toFixed(2)}×ATR) e modelo ${(pDir * 100).toFixed(1)}% para ${ps.direction}`;
+    } else {
+      ps.status = 'MANTER';
+      ps.reason = move >= 0 ? 'a favor da entrada' : `contra, mas dentro do limite (${(move / (a || 1)).toFixed(2)}×ATR${pDir != null ? `, modelo ${(pDir * 100).toFixed(1)}%` : ''})`;
+    }
+    if (ps.status === 'ABANDONAR' && prev !== 'ABANDONAR')
+      this.emit('notify', { kind: 'abandonar', text: `ABANDONE a operação ${ps.direction} ${this.symbol}: ${ps.reason}` });
+    this.emit('position', ps);
+  }
+
   _passes(e, i) {
     if (this.dataState !== 'ok') return { ok: false, reason: 'dados ' + this.dataState };
     return research.liveDecision(this.candles, i, e, { symbol: this.symbol, tf: this.tf, expiryMin: this.cfg.expiryMin }, this.cfg, true);
@@ -281,6 +337,7 @@ class Engine extends EventEmitter {
       this.candles[this.candles.length - 1] = c;
       this.emit('candle', c);
       this._liveProb();
+      this._watchPosition();
       return;
     }
     if (last && c.epoch > last.epoch) {

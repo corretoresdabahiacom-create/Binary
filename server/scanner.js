@@ -8,9 +8,10 @@ const { fetchHistory } = require('./catalog');
 const prob = require('./probability');
 const research = require('./research');
 
-const DEFAULT_SYMBOLS = ['R_10', 'R_25', 'R_50', 'R_75', 'R_100', 'frxEURUSD', 'frxGBPUSD', 'frxUSDJPY', 'frxAUDUSD', 'frxEURGBP'];
-const NAMES = { R_10: 'Volatility 10', R_25: 'Volatility 25', R_50: 'Volatility 50', R_75: 'Volatility 75', R_100: 'Volatility 100',
-  frxEURUSD: 'EUR/USD', frxGBPUSD: 'GBP/USD', frxUSDJPY: 'USD/JPY', frxAUDUSD: 'AUD/USD', frxEURGBP: 'EUR/GBP' };
+// Foco em forex: índices Volatility (sorteio aleatório) foram retirados — sem vantagem possível (backtest v2).
+const DEFAULT_SYMBOLS = ['frxEURUSD', 'frxGBPUSD', 'frxUSDJPY', 'frxAUDUSD', 'frxUSDCAD', 'frxUSDCHF', 'frxNZDUSD', 'frxEURGBP', 'frxEURJPY', 'frxGBPJPY'];
+const NAMES = { frxEURUSD: 'EUR/USD', frxGBPUSD: 'GBP/USD', frxUSDJPY: 'USD/JPY', frxAUDUSD: 'AUD/USD', frxUSDCAD: 'USD/CAD',
+  frxUSDCHF: 'USD/CHF', frxNZDUSD: 'NZD/USD', frxEURGBP: 'EUR/GBP', frxEURJPY: 'EUR/JPY', frxGBPJPY: 'GBP/JPY' };
 const TFS = { '5m': 300, '15m': 900 };
 const EXPIRIES = [5, 15];
 const HIST = 10000, LIVE = 300;

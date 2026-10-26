@@ -60,7 +60,7 @@ test('motor: demo → compra real via proposal+buy, resultado, risco e diagnóst
   assert.ok(mock.state.wsUrls.some(u => u.includes('/ws/real?otp=')), 'WS real com OTP novo');
 
   // vela fecha → motor não quebra e mantém estado
-  e._onPublic({ ohlc: { open_time: e.candles.at(-1).epoch + e.gran(), open: 1, high: 2, low: 0.5, close: 1.5, granularity: e.gran(), symbol: 'R_100' } });
+  e._onPublic({ ohlc: { open_time: e.candles.at(-1).epoch + e.gran(), open: 1, high: 2, low: 0.5, close: 1.5, granularity: e.gran(), symbol: e.symbol } });
   assert.strictEqual(e.candles.length, 501);
 
   e.pub.close(); e.trade.close(); mock.server.close();

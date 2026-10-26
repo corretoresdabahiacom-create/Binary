@@ -21,26 +21,26 @@ function ready(sc, sym, tf, g) {
 
 test('scanner: preliminar → confirmado → resultado, em todas as expirações válidas', () => {
   const recs = new Map(), opps = [];
-  const sc = new Scanner({ getCfg: () => cfg, symbols: ['R_50'], tfs: ['5m'], record: s => recs.set(s.uid, { ...s }) });
+  const sc = new Scanner({ getCfg: () => cfg, symbols: ['frxGBPUSD'], tfs: ['5m'], record: s => recs.set(s.uid, { ...s }) });
   sc.on('opportunity', o => opps.push(o));
-  const st = ready(sc, 'R_50', '5m', 300);
+  const st = ready(sc, 'frxGBPUSD', '5m', 300);
   sc._live(st);
   const pre = opps.filter(o => o.stage === 'preliminar');
   assert.deepStrictEqual(pre.map(o => o.expiryMin).sort(), [15, 5], 'avisa 5 e 15 min');
-  assert.ok(pre.every(o => o.direction === 'CALL' && o.p >= 0.56 && o.lo > 0.5 && o.name === 'Volatility 50'));
+  assert.ok(pre.every(o => o.direction === 'CALL' && o.p >= 0.56 && o.lo > 0.5 && o.name === 'GBP/USD'));
   st._at = 0; sc._live(st);
   assert.strictEqual(opps.filter(o => o.stage === 'preliminar').length, 2, 'não repete na mesma vela');
   // vela fecha → confirmação com a vela fechada
   const last = st.candles.at(-1);
-  sc._onOhlc({ symbol: 'R_50', granularity: 300, open_time: last.epoch + 300, open: last.close, high: last.close, low: last.close, close: last.close });
+  sc._onOhlc({ symbol: 'frxGBPUSD', granularity: 300, open_time: last.epoch + 300, open: last.close, high: last.close, low: last.close, close: last.close });
   const conf = opps.filter(o => o.stage === 'confirmado');
   assert.strictEqual(conf.length, 2);
   assert.ok(conf[0].entryUntil - conf[0].candleOpen === 30, 'janela de entrada = 10% da vela');
   assert.strictEqual(recs.size, 2, 'sinais registrados para o relatório');
   // vela de expiração (5 min) fecha → resultado observado
   const c2 = st.candles.at(-1);
-  sc._onOhlc({ symbol: 'R_50', granularity: 300, open_time: c2.epoch, open: c2.open, high: c2.open + 2, low: c2.open, close: c2.open + 2 });
-  sc._onOhlc({ symbol: 'R_50', granularity: 300, open_time: c2.epoch + 300, open: c2.open + 2, high: c2.open + 2, low: c2.open + 2, close: c2.open + 2 });
+  sc._onOhlc({ symbol: 'frxGBPUSD', granularity: 300, open_time: c2.epoch, open: c2.open, high: c2.open + 2, low: c2.open, close: c2.open + 2 });
+  sc._onOhlc({ symbol: 'frxGBPUSD', granularity: 300, open_time: c2.epoch + 300, open: c2.open + 2, high: c2.open + 2, low: c2.open + 2, close: c2.open + 2 });
   const five = [...recs.values()].find(r => r.expiryMin === 5);
   assert.strictEqual(five.outcome, 'favorável');
   assert.strictEqual([...recs.values()].find(r => r.expiryMin === 15).outcome, undefined, '15 min ainda aberto');
