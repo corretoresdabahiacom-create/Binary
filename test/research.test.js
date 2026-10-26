@@ -65,7 +65,7 @@ test('backtest v2: efeito real de horário é descoberto fora da amostra (meta-m
 test('decisão ao vivo: sem research usa v1; não aprovada bloqueia; liberar permite', () => {
   const c = walk(400, 7);
   const est = { pCall: 0.62, pPut: 0.38, p: 0.62, direction: 'CALL', n: 200, lo: 0.55, hi: 0.69, level: 'estado completo' };
-  const cfg = { minProb: 0.56, minSamples: 40, edgeMargin: 0.02, allowUnapproved: 0 };
+  const cfg = { minProb: 0.56, minSamples: 40, edgeMargin: 0.02, allowUnapproved: 0, analise: 0 };
   const v1 = R.liveDecision(c, 399, est, { symbol: 'R_10', tf: '5m', expiryMin: 5 }, cfg, true);
   assert.strictEqual(v1.version, 'v1'); assert.ok(v1.ok);
   R.saveResearch({ combos: { 'R_10|5m|5': { approved: false, iso: null, meta: null, payout: 0.95 } } });

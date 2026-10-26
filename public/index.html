@@ -140,6 +140,7 @@ details summary{cursor:pointer;color:var(--mute);font-size:12px;text-transform:u
           <div style="flex:1"><label>Prob. mínima (%)</label><input type="number" id="minProb" min="50" max="95" step="1" value="56"></div>
           <div style="flex:1"><label>Amostra mínima</label><input type="number" id="minSamples" min="10" step="10" value="40"></div>
         </div>
+        <div id="anBox" class="hint" style="margin-top:10px"></div>
         <h3 style="margin-top:14px">Sinal para a próxima vela</h3>
         <label>Expiração pretendida (independente do timeframe)</label>
         <div class="seg" id="exp" style="width:100%"><button data-e="5" class="on" style="flex:1">5 min</button><button data-e="15" style="flex:1">15 min</button></div>
@@ -169,6 +170,11 @@ details summary{cursor:pointer;color:var(--mute);font-size:12px;text-transform:u
         <label>Margem mínima sobre o empate (p.p.)</label><input type="number" id="edgeMargin" min="0" max="20" step="0.5" value="2">
         <label>Catalogador (regras do histórico, refeitas a cada 6 h)</label>
         <select id="catFilter"><option value="0">Só informar concordância (recomendado até medir)</option><option value="1">Bloquear quando o catálogo discordar</option><option value="2">Exigir concordância do catálogo</option></select>
+        <details style="margin-top:10px"><summary>Motor de análise e bloqueios</summary>
+          <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="anOn" style="width:auto"> Motor de análise ligado (bloqueia CALL/PUT em condições desfavoráveis)</label>
+          <div id="fBox"></div>
+          <p class="hint">Os bloqueados ficam registrados com o resultado que teriam; o backtest compara v2 (sem bloqueios) e v3 (com bloqueios).</p>
+        </details>
         <label style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="checkbox" id="allowUn" style="width:auto"> Avisar também combinações NÃO aprovadas (mais operações, sem vantagem comprovada)</label>
       </div>
 
@@ -369,7 +375,7 @@ const on = {
     $('#dModel').textContent = s.model ? `${s.model.samples} amostras · ${s.model.horizon} vela(s)` : 'indisponível';
     for (const [id, k, f] of [['minProb', 'minProb', 100], ['minSamples', 'minSamples', 1]]) if (document.activeElement !== $('#' + id)) $('#' + id).value = Math.round(s.cfg[k] * f);
     position = s.position; renderPos();
-    drawLevels(s.levels);
+    drawLevels(s.levels); renderAnalysis(); renderFilters();
     if (s.prob) renderProb(s.prob);
     $('#dPrice').textContent = s.lastPrice == null ? '—' : (+s.lastPrice).toFixed(5);
     $('#dBlock').textContent = s.blockReason ? 'Sinais suspensos: ' + s.blockReason : '';
@@ -398,7 +404,7 @@ const on = {
 
 // ---------- Renderização ----------
 function renderProb(p) {
-  lastProb = p; renderBig();
+  lastProb = p; renderBig(); renderAnalysis();
   const el = $('#prob');
   if (!p || p.pCall == null) { el.innerHTML = `<b>AGUARDAR</b> — ${esc((p && p.reason) || 'sem estimativa')}`; return; }
   const c = Math.round(p.pCall * 1000) / 10, v = Math.round(p.pPut * 1000) / 10;
@@ -425,6 +431,25 @@ function renderPos() {
     <div class="hint">Regra de abandono não comprovada em backtest; o valor de venda antecipada é o que a Deriv oferecer.</div>
     <button class="btn ghost" id="posClr" style="margin-top:6px">Encerrar acompanhamento</button></div>`;
   $('#posClr').onclick = () => call('position_clear').catch(() => {});
+}
+const REG = { A: 'A · reversão potencial de alta', B: 'B · reversão potencial de baixa', C: 'C · continuação de alta', D: 'D · continuação de baixa', E: 'E · lateral / sem direção', F: 'F · rompimento não confirmado', G: 'G · inadequado para operar' };
+const FL = { integridade: 'Integridade dos dados', historico: 'Histórico mínimo', estendido: 'Movimento estendido', lateral: 'Mercado lateral (ADX baixo)', conflito: 'Conflito com a tendência / rompimento', espaco: 'Pouco espaço até S/R', baixaVol: 'Volatilidade muito baixa' };
+function renderAnalysis() {
+  const a = S && S.analysis, el = $('#anBox'); if (!a) { el.innerHTML = ''; return; }
+  const dir = lastProb && lastProb.direction, g = dir === 'PUT' ? a.put : a.call;
+  const z = (a.zonas || []).slice(0, 2).map(x => `${x.tipo === 'resistencia' ? 'R' : 'S'} ${x.preco} (${x.toques}×, ${x.distanciaATR}×ATR, ${x.estado})`).join(' · ') || '—';
+  const i = a.indicadores || {};
+  el.innerHTML = `<b>Vela fechada ${hhmm(a.velaFechada)}</b> · contexto: <b>${esc(REG[a.regime] || a.regime || '—')}</b>${a.regimeMotivo ? ' — ' + esc(a.regimeMotivo) : ''}<br>
+    Padrões: ${esc((a.padroes || []).join(', ') || 'nenhum')} · S/R: ${esc(z)}<br>
+    ADX ${i.adx14 ?? '—'} · RSI ${i.rsi14 ?? '—'} · ATR pct ${i.atrPercentil ?? '—'} · EMA200 ${i.ema200 == null ? 'sem histórico' : (a.anatomia.close > i.ema200 ? 'preço acima' : 'preço abaixo')}<br>
+    ${dir ? `Para <b>${dir}</b> — a favor: ${esc((g.favor || []).join('; ') || '—')} · contra: ${esc((g.contra || []).join('; ') || '—')}${g.blocks.length ? `<br><b>Bloqueios:</b> ${esc(g.blocks.join('; '))}` : ''}` : ''}
+    ${(a.problemas || []).length ? `<br><b>Dados:</b> ${esc(a.problemas.join(', '))}` : ''}`;
+}
+function renderFilters() {
+  if (!S || !S.cfg.filters || document.activeElement && document.activeElement.closest && document.activeElement.closest('#fBox')) return;
+  $('#anOn').checked = S.cfg.analise !== 0;
+  $('#fBox').innerHTML = Object.entries(FL).map(([k, n]) => `<label style="display:flex;gap:8px;align-items:center;margin:4px 0"><input type="checkbox" data-f="${k}" style="width:auto" ${S.cfg.filters[k] ? 'checked' : ''}> ${n}</label>`).join('');
+  $('#fBox').querySelectorAll('input').forEach(x => x.onchange = () => call('config', { filters: { [x.dataset.f]: x.checked ? 1 : 0 } }).catch(() => {}));
 }
 function renderBig() {
   if (position && position.status === 'ABANDONAR') { const b = $('#big'); b.className = 'big put'; b.innerHTML = `<div class="t">ABANDONAR ✕</div><div class="s">${esc(position.direction)} ${esc(position.name || position.symbol)} — ${esc(position.reason)}</div>`; return; }
@@ -499,8 +524,8 @@ function notifyUser(n) {
 async function loadSignals() {
   try {
     const r = await (await fetch('/api/signals')).json(), st = r.stats;
-    $('#sigStat').textContent = `${st.avaliados} · ${st.favoraveis}${st.taxa != null ? ' (' + Math.round(st.taxa * 100) + '%)' : ''} de ${st.total}`;
-    $('#sigList').innerHTML = r.signals.slice(-30).reverse().map(x => `<div>${new Date(x.createdAt).toLocaleTimeString('pt-BR')} ${x.direction} ${esc(x.symbol)} ${x.tf}/exp ${x.expiryMin}m · ${x.status}${x.outcome ? ' · ' + x.outcome : ''}${x.invalidReason ? ' · ' + esc(x.invalidReason) : ''}</div>`).join('') || '<div>Nenhum sinal ainda.</div>';
+    $('#sigStat').textContent = `${st.avaliados} · ${st.favoraveis}${st.taxa != null ? ' (' + Math.round(st.taxa * 100) + '%)' : ''} de ${st.total}${st.bloqueados && st.bloqueados.avaliados ? ` · bloqueados: ${st.bloqueados.favoraveisSeOperasse}/${st.bloqueados.avaliados} teriam dado certo` : ''}`;
+    $('#sigList').innerHTML = r.signals.slice(-30).reverse().map(x => `<div>${new Date(x.createdAt).toLocaleTimeString('pt-BR')} ${x.direction} ${esc(x.symbol)} ${x.tf}/exp ${x.expiryMin}m · ${x.status}${x.outcome ? ' · ' + x.outcome : ''}${x.invalidReason ? ' · ' + esc(x.invalidReason) : ''}${x.status === 'bloqueado' && x.reason ? ' · ' + esc(x.reason) : ''}</div>`).join('') || '<div>Nenhum sinal ainda.</div>';
   } catch {}
 }
 function renderSignal() {
@@ -640,6 +665,7 @@ $('#inCall').onclick = () => call('entered', { direction: 'CALL' }).catch(() => 
 $('#inPut').onclick = () => call('entered', { direction: 'PUT' }).catch(() => {});
 $('#rsRun').onclick = () => call('research_run').then(() => toast('Backtest v2 iniciado — leva alguns minutos', 'ok')).catch(() => {});
 $('#edgeMargin').onchange = () => call('config', { edgeMargin: +$('#edgeMargin').value / 100 }).catch(() => {});
+$('#anOn').onchange = () => call('config', { analise: $('#anOn').checked ? 1 : 0 }).catch(() => {});
 $('#catFilter').onchange = () => call('config', { catalogFilter: +$('#catFilter').value }).catch(() => {});
 $('#allowUn').onchange = () => call('config', { allowUnapproved: $('#allowUn').checked ? 1 : 0 }).catch(() => {});
 </script>

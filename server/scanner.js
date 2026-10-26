@@ -164,10 +164,16 @@ class Scanner extends EventEmitter {
       if (!e) continue;
       const pass = this._passes(e, st, i, exp);
       st.last[exp] = { pCall: e.pCall, p: pass.p ?? e.p, direction: pass.direction || e.direction, approved: pass.approved, version: pass.version, n: e.n, ok: pass.ok, reason: pass.reason, stage: pass.ok ? 'confirmado' : 'AGUARDAR' };
+      if (!pass.ok && pass.blocks && pass.direction && !this.isActive(st.sym, st.tf, +exp)) {   // bloqueado: registra para medir o custo do filtro
+        const bs = { uid: `${newCandle.epoch}-${st.sym}-${st.tf}-${pass.direction}-x${exp}-b`, status: 'bloqueado', stage: 'bloqueado', origin: 'scanner',
+          symbol: st.sym, tf: st.tf, expiryMin: +exp, strategy: e.model, createdAt: Date.now(), direction: pass.direction, confidence: pass.p,
+          version: pass.version, reason: pass.reason, blocks: pass.blocks, analysis: pass.analysis, candleOpen: newCandle.epoch, expiresAt: newCandle.epoch, price: newCandle.open };
+        this.pending.push(bs); this.record(bs);
+      }
       if (!pass.ok || this.isActive(st.sym, st.tf, +exp)) continue; // combinação aberta no painel: o painel confirma e registra
       const sig = { uid: `${newCandle.epoch}-${st.sym}-${st.tf}-${pass.direction}-x${exp}`, status: 'valido', stage: 'confirmado', origin: 'scanner',
         symbol: st.sym, tf: st.tf, expiryMin: +exp, strategy: e.model, source: 'Deriv API oficial (scanner)', createdAt: Date.now(),
-        direction: pass.direction, confidence: pass.p, ev: pass.ev, version: pass.version, catalog: pass.catalog, pCall: e.pCall, pPut: e.pPut, lo: e.lo, hi: e.hi, n: e.n, level: e.level,
+        direction: pass.direction, confidence: pass.p, ev: pass.ev, version: pass.version, catalog: pass.catalog, analysis: pass.analysis, pCall: e.pCall, pPut: e.pPut, lo: e.lo, hi: e.hi, n: e.n, level: e.level,
         reason: pass.reason, candleOpen: newCandle.epoch, expiresAt: newCandle.epoch + Math.round(st.gran * cfg.windowPct), price: newCandle.open };
       this.pending.push(sig); this.record(sig);
       if (!this.isActive(st.sym, st.tf, +exp))
@@ -185,7 +191,7 @@ class Scanner extends EventEmitter {
       if (!cc) return !(st.hist.length && st.hist.at(-1).epoch >= end); // aguardando; descarta se houve lacuna
       const d = cc.close - s.price;
       s.outcome = d === 0 ? 'empate' : (d > 0) === (s.direction === 'CALL') ? 'favorável' : 'desfavorável';
-      s.exitPrice = cc.close; s.status = 'expirado'; this.record(s);
+      s.exitPrice = cc.close; if (s.status !== 'bloqueado') s.status = 'expirado'; this.record(s);
       return false;
     });
   }

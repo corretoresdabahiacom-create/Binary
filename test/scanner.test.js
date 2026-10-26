@@ -7,7 +7,7 @@ require('../server/research').clock.now = () => Date.UTC(2026, 9, 26, 13) / 1000
 const { Scanner } = require('../server/scanner');
 const prob = require('../server/probability');
 
-const cfg = { minProb: 0.56, minSamples: 40, maxDataAgeSec: 20, windowPct: 0.1 };
+const cfg = { minProb: 0.56, minSamples: 40, maxDataAgeSec: 20, windowPct: 0.1, analise: 0 }; // bloqueios testados em analysis.test.js
 function trend(n, g, t0) { let p = 100; return Array.from({ length: n }, (_, i) => { const o = p; p += (i % 7 === 3 ? -0.4 : 1); return { epoch: t0 + i * g, open: o, high: Math.max(o, p) + .1, low: Math.min(o, p) - .1, close: p }; }); }
 function ready(sc, sym, tf, g) {
   const st = sc.streams.get(`${sym}|${tf}`);

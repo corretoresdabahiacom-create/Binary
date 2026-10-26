@@ -139,6 +139,27 @@ function detectPatterns(candles, i) {
   return out;
 }
 
+// ADX de Wilder (força direcional, sem sentido). null durante o aquecimento (~2×period velas).
+function adx(candles, period = 14) {
+  const n = candles.length, out = Array(n).fill(null);
+  if (n < 2 * period + 1) return out;
+  let trS = 0, pS = 0, mS = 0, dxs = [], adxV = null;
+  for (let i = 1; i < n; i++) {
+    const c = candles[i], p = candles[i - 1];
+    const tr = Math.max(c.high - c.low, Math.abs(c.high - p.close), Math.abs(c.low - p.close));
+    const up = c.high - p.high, dn = p.low - c.low;
+    const pdm = up > dn && up > 0 ? up : 0, mdm = dn > up && dn > 0 ? dn : 0;
+    if (i <= period) { trS += tr; pS += pdm; mS += mdm; if (i < period) continue; }
+    else { trS = trS - trS / period + tr; pS = pS - pS / period + pdm; mS = mS - mS / period + mdm; }
+    const pdi = trS ? 100 * pS / trS : 0, mdi = trS ? 100 * mS / trS : 0;
+    const dx = pdi + mdi ? 100 * Math.abs(pdi - mdi) / (pdi + mdi) : 0;
+    if (adxV == null) { dxs.push(dx); if (dxs.length === period) adxV = dxs.reduce((a, b) => a + b, 0) / period; else continue; }
+    else adxV = (adxV * (period - 1) + dx) / period;
+    out[i] = adxV;
+  }
+  return out;
+}
+
 // Snapshot dos indicadores e padrões para a vela i (usado pelo catálogo e pelo motor de sinais).
 function computeSeries(candles) {
   const closes = candles.map(c => c.close);
@@ -197,4 +218,4 @@ function localScore(s) {
   return { score, direction: score > 0 ? 'CALL' : score < 0 ? 'PUT' : null, reasons };
 }
 
-module.exports = { sma, ema, rsi, macd, bollinger, atr, detectPatterns, computeSeries, snapshot, localScore };
+module.exports = { sma, ema, rsi, macd, bollinger, atr, adx, detectPatterns, computeSeries, snapshot, localScore };

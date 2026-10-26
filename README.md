@@ -27,6 +27,11 @@ Monitor de mercado para **decisão manual**: o app mostra o gráfico, emite CALL
 - **Suporte e resistência:** topos/fundos confirmados (fractais), agrupados por 0,5×ATR, desenhados no gráfico (R/S × nº de toques); o espaço até o nível oposto é uma feature do meta-modelo do v2.
 - **Catalogador em segundo plano:** para cada par e expiração, regras (hora, dia, padrão de vela, indicadores) achadas em 70% do histórico e conferidas nos 30% restantes (Bonferroni), refeitas a cada 6 h. Cada sinal mostra se o catálogo **concorda/discorda**; opção de bloquear discordância ou exigir concordância. As estatísticas por concordância (`/api/signals` → `porCatalogo`) dizem se o filtro melhora o acerto antes de ligá-lo.
 - **Histórico no gráfico:** sinais anteriores do par marcados nas velas (✓ favorável, ✗ desfavorável).
+- **Motor de análise multimétodo (`server/analysis.js`, velas fechadas, sem dados futuros):** anatomia da vela (corpo, pavios, posição do fechamento, amplitude em ATR); indicadores EMA 9/21/50/200, ADX 14 (Wilder), RSI 14, MACD, Bollinger, ATR com aquecimento validado; padrões (engolfo, martelo, estrela, doji, harami, rejeição com pavio em suporte/resistência, vela de impulso); **zonas** de S/R (limites, toques, idade, relevância, estado: aproximando/rejeitando/rompendo); **regime A–G** (reversão de alta/baixa, continuação de alta/baixa, lateral, rompimento não confirmado, inadequado).
+  - **Bloqueios (cada um desligável):** integridade dos dados (OHLC inválido, duplicadas, fora de ordem, lacuna intradiária), histórico mínimo, movimento estendido, lateral (ADX < 15), conflito com a tendência ou rompimento não confirmado, pouco espaço até S/R (< 0,5×ATR), volatilidade muito baixa.
+  - Cada sinal mostra contexto, padrão, S/R, indicadores, fatores **a favor/contra** e bloqueios, e é gravado com a auditoria completa. Decisões **bloqueadas** também são gravadas e avaliadas (ficam fora da taxa de acerto principal) para medir se cada filtro ajuda.
+  - **Backtest v2** passa a reportar: referência simples (seguir a cor da última vela), v1, v2, **v3 = v2 + bloqueios** (é o v3 que é aprovado e vai ao vivo), resultados por regime, acerto que os bloqueados teriam e estabilidade por janela.
+  - Não implementado (sem fonte verificada/autorizada): calendário econômico; spread não se aplica a Rise/Fall (o custo está no payout, que é medido); multi-timeframe como confirmação não foi adicionado porque não há evidência de ganho — os gráficos de 5 e 15 min são avaliados como combinações separadas no scanner.
 - **Ciclo do sinal:** válido → expirado (janela de entrada acabou) ou invalidado (com motivo). Tudo gravado em `data/signals.json` com ativo, timeframe, expiração, estratégia, horário e idade do dado.
 - **Resultado observado:** após a vela de expiração fechar, compara fechamento vs. preço de abertura do sinal (favorável / desfavorável / empate). Nunca usa dados futuros.
 - **Alertas no Windows** (notificação do navegador + som) para sinal, invalidação, dados atrasados e retomada. Permita notificações quando o navegador pedir.
@@ -39,7 +44,7 @@ Monitor de mercado para **decisão manual**: o app mostra o gráfico, emite CALL
 - **Celular:** sem push. Acesso remoto só via túnel (ver seção Cloudflare abaixo); o monitor depende do PC ligado.
 - Sinais vêm de regras de indicadores (`indicadores-v1`) sem vantagem comprovada. Nada aqui é promessa de lucro ou taxa de acerto.
 
-**Testes:** `npm test` (43 testes; usam um servidor Deriv **simulado** — validam a lógica, não a integração real).
+**Testes:** `npm test` (50 testes; usam um servidor Deriv **simulado** — validam a lógica, não a integração real).
 
 ---
 

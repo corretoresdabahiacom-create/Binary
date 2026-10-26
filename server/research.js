@@ -11,6 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const { computeSeries, snapshot } = require('./indicators');
 const SR = require('./levels');
+const AN = require('./analysis');
 
 const DATA_DIR = () => process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 const RESEARCH_FILE = () => path.join(DATA_DIR(), 'research.json');
@@ -167,6 +168,16 @@ function tradeable(sym, epoch) {
 
 // Regra ao vivo: v2 (calibração + meta + VE + aprovação) quando há data/research.json; senão a regra v1.
 function liveDecision(candles, i, est, combo, cfg, fresh) {
+  const d = baseDecision(candles, i, est, combo, cfg, fresh);
+  if (!d.ok || cfg.analise === 0) return d;
+  // bloqueios do motor de análise (velas fechadas até i; na vela em formação o resultado é instável/preliminar)
+  const gran = i > 0 ? candles[i].epoch - candles[i - 1].epoch : null;
+  const an = AN.analyze(candles, i, { gran, cfg: cfg.filters }), g = AN.gates(an, d.direction, cfg.filters);
+  const out = { ...d, analysis: AN.audit(an, g) };
+  if (g.blocks.length) return { ...out, ok: false, reason: 'bloqueio: ' + g.blocks[0], blocks: g.blocks };
+  return out;
+}
+function baseDecision(candles, i, est, combo, cfg, fresh) {
   if (!fresh) return { ok: false, reason: 'dados atrasados' };
   if (!contractRules(combo.symbol).expiries.includes(+combo.expiryMin)) return { ok: false, reason: `a Deriv não oferece expiração de ${combo.expiryMin} min neste mercado (mínimo 15)` };
   if (!tradeable(combo.symbol, clock.now())) return { ok: false, reason: 'forex sem negociação na Deriv entre 20:50 e 22:00 UTC' };

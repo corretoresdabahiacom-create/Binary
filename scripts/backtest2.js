@@ -34,19 +34,19 @@ async function payoutOf(sock, sym, exp) {
       if (!r) continue;
       r.payoutSource = pay.source; r.candles = c.length; r.from = c[0].epoch; r.to = c.at(-1).epoch;
       results[key] = r;
-      console.log(`${(NAMES[sym] || sym).padEnd(15)} ${tf.padEnd(3)} exp${String(exp).padEnd(2)} payout ${pct(pay.payout)} | v1: ${String(r.v1.n).padStart(4)} op ${pct(r.v1.rate)} | v2: ${String(r.v2.n).padStart(4)} op ${pct(r.v2.rate)} VE ${pct(r.v2.evPerTrade)} p=${r.v2.pValue.toFixed(3)} (${((Date.now() - t) / 1000).toFixed(0)} s)`);
+      console.log(`${(NAMES[sym] || sym).padEnd(15)} ${tf.padEnd(3)} exp${String(exp).padEnd(2)} payout ${pct(pay.payout)} | v1: ${String(r.v1.n).padStart(4)} op ${pct(r.v1.rate)} | ref ${pct(r.referencia.rate)} | v2: ${String(r.v2.n).padStart(4)} op ${pct(r.v2.rate)} | v3: ${String(r.v3.n).padStart(4)} op ${pct(r.v3.rate)} VE ${pct(r.v3.evPerTrade)} p=${r.v3.pValue.toFixed(3)} (${((Date.now() - t) / 1000).toFixed(0)} s)`);
     }
   }
   sock.close();
   approve(results);
   const agg = v => { const rs = Object.values(results).map(r => r[v]); const n = rs.reduce((a, x) => a + x.n, 0), w = rs.reduce((a, x) => a + x.wins, 0); return { n, w, rate: n ? w / n : null }; };
-  const a1 = agg('v1'), a2 = agg('v2');
-  console.log(`\nAGREGADO (operações independentes): v1 ${a1.n} op ${pct(a1.rate)} | v2 ${a2.n} op ${pct(a2.rate)}`);
+  const a1 = agg('v1'), a2 = agg('v2'), a3 = agg('v3'), ar = agg('referencia');
+  console.log(`\nAGREGADO (operações independentes): referência ${ar.n} op ${pct(ar.rate)} | v1 ${a1.n} op ${pct(a1.rate)} | v2 ${a2.n} op ${pct(a2.rate)} | v3 ${a3.n} op ${pct(a3.rate)}`);
   const ok = Object.entries(results).filter(([, r]) => r.approved);
   console.log(`APROVADAS (FDR 10%, VE>0, ≥30 op): ${ok.length ? ok.map(([k]) => k).join(', ') : 'nenhuma'}`);
   const combos = {};
   for (const [k, r] of Object.entries(results)) combos[k] = { approved: r.approved, iso: r.art.iso, meta: r.art.meta, payout: r.payout, payoutSource: r.payoutSource,
-    v1: r.v1, v2: r.v2, calibration: r.calibration, v1PorSessao: r.v1PorSessao, folds: r.folds, candles: r.candles, from: r.from, to: r.to };
-  saveResearch({ generatedAt: new Date().toISOString(), method: 'walk-forward 1000 velas, embargo h+2, isotônica + logística em 30% fora da amostra do treino, sem sobreposição, BH-FDR 10%', aggregate: { v1: a1, v2: a2 }, combos });
+    v1: r.v1, v2: r.v2, v3: r.v3, referencia: r.referencia, v2PorRegime: r.v2PorRegime, bloqueadosPorMotivo: r.bloqueadosPorMotivo, estabilidade: r.estabilidade, calibration: r.calibration, v1PorSessao: r.v1PorSessao, folds: r.folds, candles: r.candles, from: r.from, to: r.to };
+  saveResearch({ generatedAt: new Date().toISOString(), method: 'walk-forward 1000 velas, embargo h+2, isotônica + logística em 30% fora da amostra do treino, 2ª calibração, sem sobreposição; v3 = v2 + bloqueios do motor de análise; aprovação por v3 com BH-FDR 10%, VE>0, >=30 op; referência = seguir a cor da última vela', aggregate: { referencia: ar, v1: a1, v2: a2, v3: a3 }, combos });
   console.log('salvo: data/research.json');
 })().catch(e => { console.error('falhou:', e.message); process.exit(1); });

@@ -150,6 +150,7 @@ test('probabilidade: tendência forte gera CALL confirmado só no fechamento, co
     let p = 100; const t0 = e.candles[0].epoch;
     e.candles = Array.from({ length: 500 }, (_, i) => { const o = p; p += (i % 7 === 3 ? -0.4 : 1); return { epoch: t0 + i * 300, open: o, high: Math.max(o, p) + .1, low: Math.min(o, p) - .1, close: p }; });
     e.hist = e.candles.slice(0, -1);
+    e.cfg.analise = 0;                               // tendência artificial: testa o caminho da probabilidade, não os bloqueios
     e.rebuildModel();
     assert.ok(e.model.samples > 400);
     e.lastTickAt = Date.now(); e.checkFreshness();
@@ -173,7 +174,7 @@ test('probabilidade ao vivo: dado atrasado mantém AGUARDAR mesmo com probabilid
     e._histKey = 'x';
     let p = 100; const t0 = e.candles[0].epoch;
     e.candles = Array.from({ length: 500 }, (_, i) => { const o = p; p += (i % 7 === 3 ? -0.4 : 1); return { epoch: t0 + i * 300, open: o, high: Math.max(o, p) + .1, low: Math.min(o, p) - .1, close: p }; });
-    e.hist = e.candles.slice(0, -1); e.rebuildModel();
+    e.hist = e.candles.slice(0, -1); e.cfg.analise = 0; e.rebuildModel();
     e.lastTickAt = Date.now() - 60000; e.checkFreshness();
     e._liveProb(true);
     assert.strictEqual(e.prob.stage, 'AGUARDAR');

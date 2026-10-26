@@ -9,6 +9,7 @@ const catalogLib = require('./catalog');
 const prob = require('./probability');
 const research = require('./research');
 const SR = require('./levels');
+const AN = require('./analysis');
 const { NAMES } = require('./scanner');
 const nm = sym => NAMES[sym] || sym;
 
@@ -34,7 +35,7 @@ class Engine extends EventEmitter {
     this.serverOffset = 0;        // segundos (hora Deriv - hora local)
     this.mode = 'manual';         // manual | auto | catalog
     this.running = false;
-    this.cfg = { stake: 1, minConfidence: 0.7, maxLoss: 10, maxConsecLosses: 3, maxTrades: 20, windowPct: 0.1, expiryMin: 15, maxDataAgeSec: 20, minProb: 0.56, minSamples: 40, edgeMargin: 0.02, allowUnapproved: 0, catalogFilter: 0 };
+    this.cfg = { stake: 1, minConfidence: 0.7, maxLoss: 10, maxConsecLosses: 3, maxTrades: 20, windowPct: 0.1, expiryMin: 15, maxDataAgeSec: 20, minProb: 0.56, minSamples: 40, edgeMargin: 0.02, allowUnapproved: 0, catalogFilter: 0, analise: 1, filters: { ...AN.DEFAULTS } };
     this.hist = [];               // histórico longo de velas fechadas (Deriv)
     this.model = null;            // tabela de probabilidade
     this.prob = null;             // estimativa ao vivo
@@ -82,7 +83,7 @@ class Engine extends EventEmitter {
       dataState: this.dataState, blockReason: this.blockReason,
       dataAgeMs: this.lastTickAt ? Date.now() - this.lastTickAt : null,
       lastPrice: this.candles.length ? this.candles[this.candles.length - 1].close : null,
-      levels: this.levels || null, position: this.position, expiries: EXPIRIES, tfs: Object.keys(GRANS), prob: this.prob, tickLatencyMs: this.tickLatencyMs,
+      levels: this.levels || null, analysis: this.analysis || null, position: this.position, expiries: EXPIRIES, tfs: Object.keys(GRANS), prob: this.prob, tickLatencyMs: this.tickLatencyMs,
       model: this.model && { name: this.model.model, horizon: this.model.horizon, samples: this.model.samples, ties: this.model.ties, from: this.model.from, to: this.model.to },
       open: this.open && this._openView(),
       signal: this.signal,
@@ -161,11 +162,12 @@ class Engine extends EventEmitter {
   }
 
   signalStats() {
-    const done = this.signals.filter(s => ['favorável', 'desfavorável', 'empate'].includes(s.outcome));
+    const done = this.signals.filter(s => s.status !== 'bloqueado' && ['favorável', 'desfavorável', 'empate'].includes(s.outcome));
     const fav = done.filter(s => s.outcome === 'favorável').length;
+    const blocked = this.signals.filter(s => s.status === 'bloqueado' && ['favorável', 'desfavorável', 'empate'].includes(s.outcome));
     const byCat = {};
     for (const s of done) { const k = (s.catalog && s.catalog.status) || 'sem dado'; const b = byCat[k] = byCat[k] || { n: 0, favoraveis: 0 }; b.n++; if (s.outcome === 'favorável') b.favoraveis++; }
-    return { porCatalogo: byCat, total: this.signals.length, avaliados: done.length, favoraveis: fav, taxa: done.length ? fav / done.length : null,
+    return { bloqueados: { avaliados: blocked.length, favoraveisSeOperasse: blocked.filter(s => s.outcome === 'favorável').length }, porCatalogo: byCat, total: this.signals.length, avaliados: done.length, favoraveis: fav, taxa: done.length ? fav / done.length : null,
       invalidados: this.signals.filter(s => s.status === 'invalidado').length };
   }
 
@@ -211,6 +213,14 @@ class Engine extends EventEmitter {
       this.emit('notify', { kind: 'preliminar', text: `Preliminar ${pass.direction} ${(pass.p * 100).toFixed(1)}% · ${nm(this.symbol)} · confirma no fechamento da vela` });
     }
     this.emit('prob', this.prob);
+  }
+
+  // Análise da última vela FECHADA (exibida no painel; não muda durante a formação da vela seguinte).
+  _analyzeClosed() {
+    const i = this.candles.length - 2; if (i < 1) { this.analysis = null; return; }
+    const an = AN.analyze(this.candles, i, { gran: this.gran(), cfg: this.cfg.filters });
+    this.analysis = { ...AN.audit(an, null), velaFechada: this.candles[i].epoch,
+      call: AN.gates(an, 'CALL', this.cfg.filters), put: AN.gates(an, 'PUT', this.cfg.filters) };
   }
 
   // ---------- acompanhamento da entrada manual ----------
@@ -320,6 +330,7 @@ class Engine extends EventEmitter {
     this.lastTickAt = Date.now();
     this.hist = []; this.prob = null; this.rebuildModel(); this.loadHistory();
     this.levels = SR.levels(this.candles, this.candles.length - 2);
+    this._analyzeClosed();
     this.catalog = catalogLib.load(this.symbol, this.gran());
     if (this.signal && this.signal.status === 'valido') this._invalidate('ativo ou timeframe alterado');
     this.signal = null;
@@ -361,6 +372,7 @@ class Engine extends EventEmitter {
       if (this.hist.length && closed.epoch > this.hist.at(-1).epoch) { this.hist.push(closed); if (this.hist.length > 12000) this.hist.shift(); }
       this.rebuildModel();
       this.levels = SR.levels(this.candles, this.candles.length - 2);
+      this._analyzeClosed();
       this._evaluateSignals();
       this._onCandleClosed(this.candles.length - 2, c).catch(e => this.log('sinal: ' + e.message, 'error'));
       this.push();
@@ -445,6 +457,12 @@ class Engine extends EventEmitter {
   _probSignal(i, newCandle) {
     const e = prob.estimate(this.model, this.candles, i, this.cfg.minSamples);
     const pass = e ? this._passes(e, i) : { ok: false, reason: this.model ? 'indicadores insuficientes' : (this.prob && this.prob.reason) || 'modelo indisponível' };
+    if (e && !pass.ok && pass.blocks && pass.direction) {
+      this._record({ uid: `${newCandle.epoch}-${this.symbol}-${this.tf}-${pass.direction}-b`, status: 'bloqueado', stage: 'bloqueado',
+        symbol: this.symbol, tf: this.tf, expiryMin: this.cfg.expiryMin, strategy: e.model, source: SOURCE, createdAt: Date.now(),
+        direction: pass.direction, confidence: pass.p, version: pass.version, reason: pass.reason, blocks: pass.blocks, analysis: pass.analysis,
+        candleOpen: newCandle.epoch, expiresAt: newCandle.epoch, price: newCandle.open });
+    }
     if (!e || !pass.ok) {
       this.prob = { ...(e || {}), stage: 'AGUARDAR', reason: pass.reason, candle: newCandle.epoch, at: Date.now() };
       this.emit('prob', this.prob); this.push(); return;
@@ -455,7 +473,7 @@ class Engine extends EventEmitter {
       symbol: this.symbol, tf: this.tf, expiryMin: this.cfg.expiryMin, strategy: e.model, source: SOURCE,
       createdAt: decidedAt, lastDataAt: this.lastTickAt, dataAgeMs: decidedAt - this.lastTickAt,
       id: ++this.signalSeq, direction: pass.direction, kind: 'probabilidade',
-      confidence: pass.p, ev: pass.ev, version: pass.version, catalog: pass.catalog, pCall: e.pCall, pPut: e.pPut, lo: e.lo, hi: e.hi, n: e.n, level: e.level, state: e.state,
+      confidence: pass.p, ev: pass.ev, version: pass.version, catalog: pass.catalog, analysis: pass.analysis, pCall: e.pCall, pPut: e.pPut, lo: e.lo, hi: e.hi, n: e.n, level: e.level, state: e.state,
       reason: pass.reason, ai: false, rule: null,
       candleOpen: newCandle.epoch, expiresAt: newCandle.epoch + Math.round(this.gran() * this.cfg.windowPct),
       price: newCandle.open, basePrice: this.candles[i].close,
@@ -596,6 +614,10 @@ class Engine extends EventEmitter {
     if (c.minSamples != null && !(Number(c.minSamples) >= 10)) throw new Error('amostra mínima ≥ 10');
     if (c.edgeMargin != null && !(Number(c.edgeMargin) >= 0 && Number(c.edgeMargin) <= 0.2)) throw new Error('margem entre 0 e 20 p.p.');
     if (c.allowUnapproved != null) c.allowUnapproved = c.allowUnapproved ? 1 : 0;
+    if (c.filters && typeof c.filters === 'object') {
+      for (const [k, v] of Object.entries(c.filters)) if (k in AN.DEFAULTS && Number.isFinite(+v)) this.cfg.filters[k] = +v;
+      delete c.filters; this._analyzeClosed();
+    }
     const oldExp = this.cfg.expiryMin;
     for (const k of Object.keys(this.cfg)) if (c[k] != null && !Number.isNaN(Number(c[k]))) this.cfg[k] = Number(c[k]);
     if (this.cfg.expiryMin !== oldExp && this.candles.length) {
