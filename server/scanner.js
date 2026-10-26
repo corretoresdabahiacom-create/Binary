@@ -4,7 +4,9 @@
 // Usa um WebSocket público próprio (a Deriv recusa assinaturas duplicadas na mesma conexão).
 const EventEmitter = require('events');
 const deriv = require('./deriv');
-const { fetchHistory } = require('./catalog');
+const catalogLib = require('./catalog');
+const { fetchHistory } = catalogLib;
+const { computeSeries } = require('./indicators');
 const prob = require('./probability');
 const research = require('./research');
 
@@ -64,7 +66,49 @@ class Scanner extends EventEmitter {
       if (Number.isInteger(hz) && hz >= 1) st.models[exp] = prob.buildModel(st.hist, hz);
     }
     st.loaded = true;
+    st.catalogs = st.catalogs || {};
+    this._catTimer(st);
     this.emit('loaded', { sym: st.sym, tf: st.tf, samples: st.hist.length });
+  }
+
+  // ---------- catalogador em segundo plano ----------
+  // Para cada expiração: regras (hora, dia, padrão de vela, indicadores) achadas em 70% do histórico e
+  // conferidas nos 30% restantes, com correção de Bonferroni. Refeito a cada 6 h, espaçado entre mercados.
+  _catTimer(st) {
+    const order = [...this.streams.values()].indexOf(st);
+    clearTimeout(st._catT);
+    st._catT = setTimeout(() => this._buildCatalogs(st), 3000 * (order + 1) + 1000);
+    if (st._catT.unref) st._catT.unref();
+  }
+  _buildCatalogs(st) {
+    for (const [exp, m] of Object.entries(st.models)) {
+      try { st.catalogs[exp] = catalogLib.buildCatalog(st.hist.slice(-10000), { horizon: m.horizon, breakeven: 1 / 1.95 }); }
+      catch (e) { st.catalogs[exp] = null; }
+    }
+    this.emit('catalog', { sym: st.sym, tf: st.tf, validated: Object.fromEntries(Object.entries(st.catalogs).map(([k, c]) => [k, c ? c.validated : 0])) });
+    clearTimeout(st._catT);
+    st._catT = setTimeout(() => this._buildCatalogs(st), 6 * 3600 * 1000);
+    if (st._catT.unref) st._catT.unref();
+  }
+  // Concordância do catálogo com uma direção na vela i de `candles`.
+  agreement(sym, tf, exp, candles, i, dir) {
+    const st = this.streams.get(`${sym}|${tf}`), cat = st && st.catalogs && st.catalogs[exp];
+    if (!cat) return { status: 'catálogo ainda não montado', rules: 0 };
+    const win = candles.slice(Math.max(0, i - 150), i + 1);
+    const m = catalogLib.matchRules(cat, win, computeSeries(win), win.length - 1);
+    if (!m.length) return { status: 'sem regra validada', rules: 0, validated: cat.validated };
+    const agree = m.filter(r => r.direction === dir), dis = m.filter(r => r.direction !== dir);
+    const best = (agree[0] || dis[0]);
+    return { status: dis.length && !agree.length ? 'discorda' : agree.length && !dis.length ? 'concorda' : 'dividido', rules: m.length,
+      best: best && { regra: best.key, direcao: best.direction, acertoTeste: best.testRate, casos: best.testN } };
+  }
+  _catalogGate(st, exp, i, pass) {
+    if (!pass.ok || !pass.direction) return pass;
+    const a = this.agreement(st.sym, st.tf, exp, st.candles, i, pass.direction), f = +this.getCfg().catalogFilter || 0;
+    const out = { ...pass, catalog: a };
+    if (f >= 1 && (a.status === 'discorda' || a.status === 'dividido')) return { ...out, ok: false, reason: `catálogo ${a.status}` };
+    if (f >= 2 && a.status !== 'concorda') return { ...out, ok: false, reason: `catálogo não confirma (${a.status})` };
+    return out;
   }
 
   fresh(st, nowMs = Date.now()) { return st.lastTick && (nowMs - st.lastTick) / 1000 <= this.getCfg().maxDataAgeSec; }
@@ -88,7 +132,7 @@ class Scanner extends EventEmitter {
   }
 
   _passes(e, st, i, exp) {
-    return research.liveDecision(st.candles, i, e, { symbol: st.sym, tf: st.tf, expiryMin: +exp }, this.getCfg(), this.fresh(st));
+    return this._catalogGate(st, exp, i, research.liveDecision(st.candles, i, e, { symbol: st.sym, tf: st.tf, expiryMin: +exp }, this.getCfg(), this.fresh(st)));
   }
 
   // Vela em formação: estimativa preliminar, no máx. 1x/s por stream.
@@ -106,7 +150,7 @@ class Scanner extends EventEmitter {
       if (pass.ok && elapsed >= 0.5 && st.notified[exp] !== key && !this.isActive(st.sym, st.tf, +exp)) {
         st.notified[exp] = key;
         this.emit('opportunity', { stage: 'preliminar', symbol: st.sym, name: this.name(st.sym), tf: st.tf, expiryMin: +exp,
-          direction: pass.direction, p: pass.p, ev: pass.ev, approved: pass.approved, n: e.n, lo: e.lo, hi: e.hi, closeAt: c.epoch + st.gran, reason: pass.reason });
+          direction: pass.direction, p: pass.p, ev: pass.ev, approved: pass.approved, catalog: pass.catalog && pass.catalog.status, n: e.n, lo: e.lo, hi: e.hi, closeAt: c.epoch + st.gran, reason: pass.reason });
       }
     }
   }
@@ -123,12 +167,12 @@ class Scanner extends EventEmitter {
       if (!pass.ok || this.isActive(st.sym, st.tf, +exp)) continue; // combinação aberta no painel: o painel confirma e registra
       const sig = { uid: `${newCandle.epoch}-${st.sym}-${st.tf}-${pass.direction}-x${exp}`, status: 'valido', stage: 'confirmado', origin: 'scanner',
         symbol: st.sym, tf: st.tf, expiryMin: +exp, strategy: e.model, source: 'Deriv API oficial (scanner)', createdAt: Date.now(),
-        direction: pass.direction, confidence: pass.p, ev: pass.ev, version: pass.version, pCall: e.pCall, pPut: e.pPut, lo: e.lo, hi: e.hi, n: e.n, level: e.level,
+        direction: pass.direction, confidence: pass.p, ev: pass.ev, version: pass.version, catalog: pass.catalog, pCall: e.pCall, pPut: e.pPut, lo: e.lo, hi: e.hi, n: e.n, level: e.level,
         reason: pass.reason, candleOpen: newCandle.epoch, expiresAt: newCandle.epoch + Math.round(st.gran * cfg.windowPct), price: newCandle.open };
       this.pending.push(sig); this.record(sig);
       if (!this.isActive(st.sym, st.tf, +exp))
         this.emit('opportunity', { stage: 'confirmado', symbol: st.sym, name: this.name(st.sym), tf: st.tf, expiryMin: +exp,
-          direction: pass.direction, p: pass.p, ev: pass.ev, approved: pass.approved, n: e.n, lo: e.lo, hi: e.hi, entryUntil: sig.expiresAt, candleOpen: newCandle.epoch, reason: pass.reason });
+          direction: pass.direction, p: pass.p, ev: pass.ev, approved: pass.approved, catalog: pass.catalog && pass.catalog.status, n: e.n, lo: e.lo, hi: e.hi, entryUntil: sig.expiresAt, candleOpen: newCandle.epoch, reason: pass.reason });
     }
   }
 

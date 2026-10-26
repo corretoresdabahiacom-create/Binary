@@ -10,6 +10,7 @@
 const fs = require('fs');
 const path = require('path');
 const { computeSeries, snapshot } = require('./indicators');
+const SR = require('./levels');
 
 const DATA_DIR = () => process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 const RESEARCH_FILE = () => path.join(DATA_DIR(), 'research.json');
@@ -75,9 +76,10 @@ function features(candles, i, est, pDir, dir) {
     fav(s.bbPos == null ? null : Math.min(1, Math.max(0, s.bbPos))),
     s.macdHist != null && s.macdHistPrev != null ? Math.sign(s.macdHist - s.macdHistPrev) * sgn : 0,
     Math.max(-3, Math.min(3, ret3 * sgn)),                    // impulso recente a favor
+    SR.room(SR.levels(candles, i), dir) / 3,                 // espaço até suporte/resistência oposto
   ];
 }
-const FEATURE_NAMES = ['prob_calibrada', 'log_n', 'nivel', 'sess_asia', 'sess_londres', 'sess_sobrep', 'sess_ny', 'atr_percentil', 'rsi_favor', 'bb_favor', 'macd_favor', 'impulso_favor'];
+const FEATURE_NAMES = ['prob_calibrada', 'log_n', 'nivel', 'sess_asia', 'sess_londres', 'sess_sobrep', 'sess_ny', 'atr_percentil', 'rsi_favor', 'bb_favor', 'macd_favor', 'impulso_favor', 'espaco_sr'];
 
 // ---------- regressão logística L2 ----------
 const sigmoid = z => 1 / (1 + Math.exp(-z));
@@ -111,7 +113,7 @@ function decide(candles, i, est, art, cfg = {}) {
   const pCallCal = applyIsotonic(art && art.iso, est.pCall);
   // avalia as duas direções e fica com a de maior probabilidade final
   let dir = pCallCal >= 0.5 ? 'CALL' : 'PUT', pDir = Math.max(pCallCal, 1 - pCallCal), q = pDir;
-  if (art && art.meta) {
+  if (art && art.meta && art.meta.w.length === FEATURE_NAMES.length) {   // artefato de versão antiga: ignora o meta
     const qc = predictLogistic(art.meta, features(candles, i, est, pCallCal, 'CALL'));
     const qp = predictLogistic(art.meta, features(candles, i, est, 1 - pCallCal, 'PUT'));
     if (qc >= qp) { dir = 'CALL'; pDir = pCallCal; q = qc; } else { dir = 'PUT'; pDir = 1 - pCallCal; q = qp; }

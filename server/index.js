@@ -61,6 +61,8 @@ engine.on('trade_closed', () => bcast('diagnostics', engine.diagnostics()));
 if (scanner) {
   scanner.on('opportunity', o => bcast('opportunity', o));
   scanner.on('log', m => engine.log(m, 'warn'));
+  scanner.on('catalog', c => engine.log(`Catálogo ${NAMES[c.sym] || c.sym} ${c.tf}: regras validadas ${JSON.stringify(c.validated)}`));
+  engine.catalogCheck = (...a) => scanner.agreement(...a);
   setInterval(() => { if (clients.size) bcast('scan', scanner.view()); }, 2000).unref();
 }
 

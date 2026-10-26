@@ -71,16 +71,17 @@ function ruleKey(f, keys) {
 }
 
 // ---------- Construção do catálogo ----------
-// candles: array ordenado por tempo. Resultado da vela i+1: CALL ganha se close > open (empate perde).
+// candles: array ordenado por tempo. Resultado: close[i+horizon] vs close[i] (mesma regra do modelo e da
+// expiração; horizon=1 → próxima vela). Empate não conta.
 function buildCatalog(candles, opts = {}) {
   const {
     minTrain = 40, minTest = 15, trainRatio = 0.7,
     breakeven = 0.52, // 1/(1+payout); ~95% de payout em Rise/Fall
-    minTestRate = 0.55, maxP = 0.05,
+    minTestRate = 0.55, maxP = 0.05, horizon = 1,
   } = opts;
   const series = computeSeries(candles);
   const start = 35; // aquecimento dos indicadores
-  const last = candles.length - 2;
+  const last = candles.length - 1 - horizon;
   if (last - start < 200) throw new Error('histórico insuficiente (mínimo ~240 velas)');
   const split = start + Math.floor((last - start) * trainRatio);
   const train = new Map(), test = new Map();
@@ -88,8 +89,9 @@ function buildCatalog(candles, opts = {}) {
 
   for (let i = start; i <= last; i++) {
     const f = features(candles, series, i);
-    const nxt = candles[i + 1];
-    const up = nxt.close > nxt.open ? 1 : 0;
+    const dd = candles[i + horizon].close - candles[i].close;
+    if (dd === 0) continue;
+    const up = dd > 0 ? 1 : 0;
     const bucket = i < split ? train : test;
     for (const keys of COMBOS) {
       const k = ruleKey(f, keys);
@@ -133,7 +135,7 @@ function buildCatalog(candles, opts = {}) {
     from: candles[0].epoch, to: candles[candles.length - 1].epoch,
     splitEpoch: candles[split].epoch,
     rulesTested: nCombos,
-    breakeven,
+    breakeven, horizon,
     rules: rules.slice(0, 200),
     validated: rules.filter(r => r.validated).length,
   };

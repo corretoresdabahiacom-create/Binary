@@ -24,6 +24,9 @@ Monitor de mercado para **decisão manual**: o app mostra o gráfico, emite CALL
   - **payout real** da Deriv (quando a API pública fornece; senão 95%, marcado) e decisão por **valor esperado** (prob. final ≥ empate + margem);
   - **Benjamini-Hochberg (FDR 10%)** entre as combinações: só as **aprovadas** (significativas, VE>0, ≥30 operações independentes) notificam. Opção para avisar também as não aprovadas.
   - Resultado salvo em `data/research.json`; painel e scanner usam automaticamente as mesmas funções (`server/research.js`).
+- **Suporte e resistência:** topos/fundos confirmados (fractais), agrupados por 0,5×ATR, desenhados no gráfico (R/S × nº de toques); o espaço até o nível oposto é uma feature do meta-modelo do v2.
+- **Catalogador em segundo plano:** para cada par e expiração, regras (hora, dia, padrão de vela, indicadores) achadas em 70% do histórico e conferidas nos 30% restantes (Bonferroni), refeitas a cada 6 h. Cada sinal mostra se o catálogo **concorda/discorda**; opção de bloquear discordância ou exigir concordância. As estatísticas por concordância (`/api/signals` → `porCatalogo`) dizem se o filtro melhora o acerto antes de ligá-lo.
+- **Histórico no gráfico:** sinais anteriores do par marcados nas velas (✓ favorável, ✗ desfavorável).
 - **Ciclo do sinal:** válido → expirado (janela de entrada acabou) ou invalidado (com motivo). Tudo gravado em `data/signals.json` com ativo, timeframe, expiração, estratégia, horário e idade do dado.
 - **Resultado observado:** após a vela de expiração fechar, compara fechamento vs. preço de abertura do sinal (favorável / desfavorável / empate). Nunca usa dados futuros.
 - **Alertas no Windows** (notificação do navegador + som) para sinal, invalidação, dados atrasados e retomada. Permita notificações quando o navegador pedir.
@@ -36,7 +39,7 @@ Monitor de mercado para **decisão manual**: o app mostra o gráfico, emite CALL
 - **Celular:** sem push. Acesso remoto só via túnel (ver seção Cloudflare abaixo); o monitor depende do PC ligado.
 - Sinais vêm de regras de indicadores (`indicadores-v1`) sem vantagem comprovada. Nada aqui é promessa de lucro ou taxa de acerto.
 
-**Testes:** `npm test` (37 testes; usam um servidor Deriv **simulado** — validam a lógica, não a integração real).
+**Testes:** `npm test` (43 testes; usam um servidor Deriv **simulado** — validam a lógica, não a integração real).
 
 ---
 

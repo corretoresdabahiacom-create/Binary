@@ -8,6 +8,9 @@ const { askClaude } = require('./claude');
 const catalogLib = require('./catalog');
 const prob = require('./probability');
 const research = require('./research');
+const SR = require('./levels');
+const { NAMES } = require('./scanner');
+const nm = sym => NAMES[sym] || sym;
 
 const TRADES_FILE = path.join(process.env.DATA_DIR || path.join(__dirname, '..', 'data'), 'trades.json');
 const SIGNALS_FILE = path.join(process.env.DATA_DIR || path.join(__dirname, '..', 'data'), 'signals.json');
@@ -31,12 +34,13 @@ class Engine extends EventEmitter {
     this.serverOffset = 0;        // segundos (hora Deriv - hora local)
     this.mode = 'manual';         // manual | auto | catalog
     this.running = false;
-    this.cfg = { stake: 1, minConfidence: 0.7, maxLoss: 10, maxConsecLosses: 3, maxTrades: 20, windowPct: 0.1, expiryMin: 15, maxDataAgeSec: 20, minProb: 0.56, minSamples: 40, edgeMargin: 0.02, allowUnapproved: 0 };
+    this.cfg = { stake: 1, minConfidence: 0.7, maxLoss: 10, maxConsecLosses: 3, maxTrades: 20, windowPct: 0.1, expiryMin: 15, maxDataAgeSec: 20, minProb: 0.56, minSamples: 40, edgeMargin: 0.02, allowUnapproved: 0, catalogFilter: 0 };
     this.hist = [];               // histórico longo de velas fechadas (Deriv)
     this.model = null;            // tabela de probabilidade
     this.prob = null;             // estimativa ao vivo
     this.tickLatencyMs = null;
-    this.position = null;         // entrada MANUAL marcada pelo usuário (o app não envia ordens)
+    this.position = null;
+    this.catalogCheck = null;     // (sym, tf, exp, candles, i, dir) => concordância do catalogador (scanner)         // entrada MANUAL marcada pelo usuário (o app não envia ordens)
     this._histKey = null;
     this.tradingEnabled = process.env.TRADING_ENABLED === '1'; // MVP: só análise, sem ordens
     this.lastTickAt = null;       // hora local do último dado recebido
@@ -78,7 +82,7 @@ class Engine extends EventEmitter {
       dataState: this.dataState, blockReason: this.blockReason,
       dataAgeMs: this.lastTickAt ? Date.now() - this.lastTickAt : null,
       lastPrice: this.candles.length ? this.candles[this.candles.length - 1].close : null,
-      position: this.position, expiries: EXPIRIES, tfs: Object.keys(GRANS), prob: this.prob, tickLatencyMs: this.tickLatencyMs,
+      levels: this.levels || null, position: this.position, expiries: EXPIRIES, tfs: Object.keys(GRANS), prob: this.prob, tickLatencyMs: this.tickLatencyMs,
       model: this.model && { name: this.model.model, horizon: this.model.horizon, samples: this.model.samples, ties: this.model.ties, from: this.model.from, to: this.model.to },
       open: this.open && this._openView(),
       signal: this.signal,
@@ -159,7 +163,9 @@ class Engine extends EventEmitter {
   signalStats() {
     const done = this.signals.filter(s => ['favorável', 'desfavorável', 'empate'].includes(s.outcome));
     const fav = done.filter(s => s.outcome === 'favorável').length;
-    return { total: this.signals.length, avaliados: done.length, favoraveis: fav, taxa: done.length ? fav / done.length : null,
+    const byCat = {};
+    for (const s of done) { const k = (s.catalog && s.catalog.status) || 'sem dado'; const b = byCat[k] = byCat[k] || { n: 0, favoraveis: 0 }; b.n++; if (s.outcome === 'favorável') b.favoraveis++; }
+    return { porCatalogo: byCat, total: this.signals.length, avaliados: done.length, favoraveis: fav, taxa: done.length ? fav / done.length : null,
       invalidados: this.signals.filter(s => s.status === 'invalidado').length };
   }
 
@@ -198,11 +204,11 @@ class Engine extends EventEmitter {
     const e = prob.estimate(this.model, this.candles, i, this.cfg.minSamples);
     if (!e) { this.prob = { stage: 'AGUARDAR', reason: 'indicadores insuficientes' }; return this.emit('prob', this.prob); }
     const pass = this._passes(e, i);
-    this.prob = { ...e, direction: pass.direction || e.direction, p: pass.p ?? e.p, version: pass.version, approved: pass.approved, ev: pass.ev, stage: pass.ok ? 'preliminar' : 'AGUARDAR', reason: pass.reason, candle: c.epoch, at: nowMs };
+    this.prob = { ...e, direction: pass.direction || e.direction, p: pass.p ?? e.p, version: pass.version, catalog: pass.catalog, approved: pass.approved, ev: pass.ev, stage: pass.ok ? 'preliminar' : 'AGUARDAR', reason: pass.reason, candle: c.epoch, at: nowMs };
     const elapsed = (this.now() - c.epoch) / this.gran();
     if (pass.ok && elapsed >= 0.5 && this._prelimFor !== c.epoch) {
       this._prelimFor = c.epoch;
-      this.emit('notify', { kind: 'preliminar', text: `Preliminar ${pass.direction} ${(pass.p * 100).toFixed(1)}% · ${this.symbol} · confirma no fechamento da vela` });
+      this.emit('notify', { kind: 'preliminar', text: `Preliminar ${pass.direction} ${(pass.p * 100).toFixed(1)}% · ${nm(this.symbol)} · confirma no fechamento da vela` });
     }
     this.emit('prob', this.prob);
   }
@@ -212,9 +218,9 @@ class Engine extends EventEmitter {
     if (!['CALL', 'PUT'].includes(direction)) throw new Error('direção inválida');
     const c = this.candles.at(-1); if (!c) throw new Error('sem dados');
     const t = this.now();
-    this.position = { direction, symbol: this.symbol, tf: this.tf, expiryMin: this.cfg.expiryMin, entryPrice: c.close, entryAt: t,
+    this.position = { direction, symbol: this.symbol, name: nm(this.symbol), tf: this.tf, expiryMin: this.cfg.expiryMin, entryPrice: c.close, entryAt: t,
       expiresAt: t + this.cfg.expiryMin * 60, status: 'MANTER', reason: 'operação acompanhada', price: c.close };
-    this.log(`Entrada marcada: ${direction} ${this.symbol} a ${c.close} · exp. ${this.cfg.expiryMin} min`, 'ok');
+    this.log(`Entrada marcada: ${direction} ${nm(this.symbol)} a ${c.close} · exp. ${this.cfg.expiryMin} min`, 'ok');
     this._watchPosition(true); this.push();
   }
   clearPosition() { this.position = null; this.push(); }
@@ -234,7 +240,7 @@ class Engine extends EventEmitter {
     if (t >= ps.expiresAt) {
       const res = move > 0 ? 'favorável' : move < 0 ? 'desfavorável' : 'empate';
       this.log(`Operação ${ps.direction} encerrou: ${res} (entrada ${ps.entryPrice} → ${price})`, move > 0 ? 'ok' : 'warn');
-      this.emit('notify', { kind: 'fim', text: `Operação ${ps.direction} ${this.symbol} encerrou: ${res}` });
+      this.emit('notify', { kind: 'fim', text: `Operação ${ps.direction} ${nm(this.symbol)} encerrou: ${res}` });
       this.position = null; this.push(); return;
     }
     const a = atr(this.candles.slice(-60), 14).at(-1) || 0;
@@ -258,13 +264,18 @@ class Engine extends EventEmitter {
       ps.reason = move >= 0 ? 'a favor da entrada' : `contra, mas dentro do limite (${(move / (a || 1)).toFixed(2)}×ATR${pDir != null ? `, modelo ${(pDir * 100).toFixed(1)}%` : ''})`;
     }
     if (ps.status === 'ABANDONAR' && prev !== 'ABANDONAR')
-      this.emit('notify', { kind: 'abandonar', text: `ABANDONE a operação ${ps.direction} ${this.symbol}: ${ps.reason}` });
+      this.emit('notify', { kind: 'abandonar', text: `ABANDONE a operação ${ps.direction} ${nm(this.symbol)}: ${ps.reason}` });
     this.emit('position', ps);
   }
 
   _passes(e, i) {
     if (this.dataState !== 'ok') return { ok: false, reason: 'dados ' + this.dataState };
-    return research.liveDecision(this.candles, i, e, { symbol: this.symbol, tf: this.tf, expiryMin: this.cfg.expiryMin }, this.cfg, true);
+    const pass = research.liveDecision(this.candles, i, e, { symbol: this.symbol, tf: this.tf, expiryMin: this.cfg.expiryMin }, this.cfg, true);
+    if (!pass.ok || !this.catalogCheck) return pass;
+    const a = this.catalogCheck(this.symbol, this.tf, this.cfg.expiryMin, this.candles, i, pass.direction), f = +this.cfg.catalogFilter || 0;
+    if (f >= 1 && (a.status === 'discorda' || a.status === 'dividido')) return { ...pass, catalog: a, ok: false, reason: `catálogo ${a.status}` };
+    if (f >= 2 && a.status !== 'concorda') return { ...pass, catalog: a, ok: false, reason: `catálogo não confirma (${a.status})` };
+    return { ...pass, catalog: a };
   }
 
   async _ensurePublic() {
@@ -308,6 +319,7 @@ class Engine extends EventEmitter {
     this.candles = (res.candles || []).map(c => ({ epoch: c.epoch, open: +c.open, high: +c.high, low: +c.low, close: +c.close }));
     this.lastTickAt = Date.now();
     this.hist = []; this.prob = null; this.rebuildModel(); this.loadHistory();
+    this.levels = SR.levels(this.candles, this.candles.length - 2);
     this.catalog = catalogLib.load(this.symbol, this.gran());
     if (this.signal && this.signal.status === 'valido') this._invalidate('ativo ou timeframe alterado');
     this.signal = null;
@@ -348,6 +360,7 @@ class Engine extends EventEmitter {
       const closed = this.candles[this.candles.length - 2];
       if (this.hist.length && closed.epoch > this.hist.at(-1).epoch) { this.hist.push(closed); if (this.hist.length > 12000) this.hist.shift(); }
       this.rebuildModel();
+      this.levels = SR.levels(this.candles, this.candles.length - 2);
       this._evaluateSignals();
       this._onCandleClosed(this.candles.length - 2, c).catch(e => this.log('sinal: ' + e.message, 'error'));
       this.push();
@@ -414,7 +427,7 @@ class Engine extends EventEmitter {
     };
     this._record(this.signal);
     this.emit('signal', this.signal);
-    this.emit('notify', { kind: 'sinal', text: `${direction === 'CALL' ? 'CALL ▲' : 'PUT ▼'} ${this.symbol} · ${this.tf} · exp. ${this.cfg.expiryMin} min` });
+    this.emit('notify', { kind: 'sinal', text: `${direction === 'CALL' ? 'CALL ▲' : 'PUT ▼'} ${nm(this.symbol)} · ${this.tf} · exp. ${this.cfg.expiryMin} min` });
     this.push();
 
     if (this.running && this.mode !== 'manual') {
@@ -442,7 +455,7 @@ class Engine extends EventEmitter {
       symbol: this.symbol, tf: this.tf, expiryMin: this.cfg.expiryMin, strategy: e.model, source: SOURCE,
       createdAt: decidedAt, lastDataAt: this.lastTickAt, dataAgeMs: decidedAt - this.lastTickAt,
       id: ++this.signalSeq, direction: pass.direction, kind: 'probabilidade',
-      confidence: pass.p, ev: pass.ev, version: pass.version, pCall: e.pCall, pPut: e.pPut, lo: e.lo, hi: e.hi, n: e.n, level: e.level, state: e.state,
+      confidence: pass.p, ev: pass.ev, version: pass.version, catalog: pass.catalog, pCall: e.pCall, pPut: e.pPut, lo: e.lo, hi: e.hi, n: e.n, level: e.level, state: e.state,
       reason: pass.reason, ai: false, rule: null,
       candleOpen: newCandle.epoch, expiresAt: newCandle.epoch + Math.round(this.gran() * this.cfg.windowPct),
       price: newCandle.open, basePrice: this.candles[i].close,
@@ -450,7 +463,7 @@ class Engine extends EventEmitter {
     this.prob = { ...e, direction: pass.direction, p: pass.p, version: pass.version, approved: pass.approved, ev: pass.ev, stage: 'confirmado', reason: pass.reason, candle: newCandle.epoch, at: decidedAt };
     this._record(this.signal);
     this.emit('signal', this.signal); this.emit('prob', this.prob);
-    this.emit('notify', { kind: 'sinal', text: `ENTRE AGORA ${pass.direction === 'CALL' ? 'CALL ▲' : 'PUT ▼'} ${(pass.p * 100).toFixed(1)}% · ${this.symbol} ${this.tf} · exp. ${this.cfg.expiryMin} min · janela ${Math.round(this.gran() * this.cfg.windowPct)} s` });
+    this.emit('notify', { kind: 'sinal', text: `ENTRE AGORA ${pass.direction === 'CALL' ? 'CALL ▲' : 'PUT ▼'} ${(pass.p * 100).toFixed(1)}% · ${nm(this.symbol)} ${this.tf} · exp. ${this.cfg.expiryMin} min · janela ${Math.round(this.gran() * this.cfg.windowPct)} s` });
     this.push();
   }
 
