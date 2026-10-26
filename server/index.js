@@ -17,6 +17,9 @@ const CONFIG = path.join(process.env.DATA_DIR || path.join(__dirname, '..', 'dat
 try { for (const l of fs.readFileSync(path.join(__dirname, '..', '.env'), 'utf8').split('\n')) { const m = l.match(/^\s*([A-Z_]+)\s*=\s*(.*)\s*$/); if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, ''); } } catch {}
 
 const engine = new Engine();
+// Atraso do loop de eventos (p99 em janelas de 10 s): se subir, algo está segurando o recebimento de ticks.
+const lag = require('perf_hooks').monitorEventLoopDelay({ resolution: 10 }); lag.enable();
+setInterval(() => { engine.perf.loopLagP99Ms = +(lag.percentile(99) / 1e6).toFixed(1); lag.reset(); engine.perf.tickMsMax = 0; }, 10000).unref();
 const scanner = process.env.SCANNER === '0' ? null : new Scanner({
   getCfg: () => engine.cfg,
   isActive: (sym, tf, exp) => engine.symbol === sym && engine.tf === tf && engine.cfg.expiryMin === exp,

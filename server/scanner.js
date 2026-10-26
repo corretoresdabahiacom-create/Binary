@@ -7,6 +7,23 @@ const deriv = require('./deriv');
 const catalogLib = require('./catalog');
 const { fetchHistory } = catalogLib;
 const { computeSeries } = require('./indicators');
+const { Worker } = require('worker_threads');
+const path = require('path');
+
+// Uma única thread auxiliar para os catálogos (fila); se worker_threads falhar, cai para a thread principal.
+let worker = null, seq = 0; const waiting = new Map();
+function catalogAsync(candles, opts) {
+  try {
+    if (!worker) {
+      worker = new Worker(path.join(__dirname, 'catalogWorker.js'));
+      worker.unref();
+      worker.on('message', m => { const w = waiting.get(m.id); if (!w) return; waiting.delete(m.id); m.error ? w.rej(new Error(m.error)) : w.res(m.cat); });
+      worker.on('error', e => { for (const w of waiting.values()) w.rej(e); waiting.clear(); worker = null; });
+    }
+    const id = ++seq;
+    return new Promise((res, rej) => { waiting.set(id, { res, rej }); worker.postMessage({ id, candles, opts }); });
+  } catch { return Promise.resolve().then(() => catalogLib.buildCatalog(candles, opts)); }
+}
 const prob = require('./probability');
 const research = require('./research');
 
@@ -80,9 +97,9 @@ class Scanner extends EventEmitter {
     st._catT = setTimeout(() => this._buildCatalogs(st), 3000 * (order + 1) + 1000);
     if (st._catT.unref) st._catT.unref();
   }
-  _buildCatalogs(st) {
+  async _buildCatalogs(st) {
     for (const [exp, m] of Object.entries(st.models)) {
-      try { st.catalogs[exp] = catalogLib.buildCatalog(st.hist.slice(-10000), { horizon: m.horizon, breakeven: 1 / 1.95 }); }
+      try { st.catalogs[exp] = await catalogAsync(st.hist.slice(-10000), { horizon: m.horizon, breakeven: 1 / 1.95 }); }
       catch (e) { st.catalogs[exp] = null; }
     }
     this.emit('catalog', { sym: st.sym, tf: st.tf, validated: Object.fromEntries(Object.entries(st.catalogs).map(([k, c]) => [k, c ? c.validated : 0])) });

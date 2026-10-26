@@ -41,6 +41,7 @@ class Engine extends EventEmitter {
     this.prob = null;             // estimativa ao vivo
     this.tickLatencyMs = null;
     this.position = null;
+    this.perf = { tickMsAvg: null, tickMsMax: 0, loopLagP99Ms: null, ticks: 0 };   // desempenho medido (relógio monotônico)
     this.catalogCheck = null;     // (sym, tf, exp, candles, i, dir) => concordância do catalogador (scanner)         // entrada MANUAL marcada pelo usuário (o app não envia ordens)
     this._histKey = null;
     this.tradingEnabled = process.env.TRADING_ENABLED === '1'; // MVP: só análise, sem ordens
@@ -83,6 +84,7 @@ class Engine extends EventEmitter {
       dataState: this.dataState, blockReason: this.blockReason,
       dataAgeMs: this.lastTickAt ? Date.now() - this.lastTickAt : null,
       lastPrice: this.candles.length ? this.candles[this.candles.length - 1].close : null,
+      perf: { tickMsAvg: this.perf.tickMsAvg == null ? null : +this.perf.tickMsAvg.toFixed(2), tickMsMax: +this.perf.tickMsMax.toFixed(1), loopLagP99Ms: this.perf.loopLagP99Ms },
       levels: this.levels || null, analysis: this.analysis || null, position: this.position, expiries: EXPIRIES, tfs: Object.keys(GRANS), prob: this.prob, tickLatencyMs: this.tickLatencyMs,
       model: this.model && { name: this.model.model, horizon: this.model.horizon, samples: this.model.samples, ties: this.model.ties, from: this.model.from, to: this.model.to },
       open: this.open && this._openView(),
@@ -349,6 +351,14 @@ class Engine extends EventEmitter {
 
   _onPublic(m) {
     if (!m.ohlc) return;
+    const t0 = performance.now();
+    try { this._onOhlc(m); } finally {
+      const d = performance.now() - t0, p = this.perf; p.ticks++;
+      p.tickMsAvg = p.tickMsAvg == null ? d : p.tickMsAvg * 0.95 + d * 0.05; if (d > p.tickMsMax) p.tickMsMax = d;
+    }
+  }
+
+  _onOhlc(m) {
     const o = m.ohlc;
     this.lastTickAt = Date.now();
     if (o.epoch) this.tickLatencyMs = Math.max(0, Math.round(this.lastTickAt - (+o.epoch - this.serverOffset) * 1000));
@@ -370,7 +380,9 @@ class Engine extends EventEmitter {
       this.emit('candle', c);
       const closed = this.candles[this.candles.length - 2];
       if (this.hist.length && closed.epoch > this.hist.at(-1).epoch) { this.hist.push(closed); if (this.hist.length > 12000) this.hist.shift(); }
-      this.rebuildModel();
+      // incremental (≈0,7 ms) em vez de refazer o modelo inteiro (≈50 ms) no momento mais sensível: o fechamento da vela
+      if (this.model && this.hist.length && this.model.horizon === this.horizon()) prob.addSample(this.model, this.hist, this.hist.length - 1 - this.model.horizon);
+      else this.rebuildModel();
       this.levels = SR.levels(this.candles, this.candles.length - 2);
       this._analyzeClosed();
       this._evaluateSignals();
