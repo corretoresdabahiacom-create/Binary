@@ -3,6 +3,7 @@ process.env.DATA_DIR = process.env.DATA_DIR || require('fs').mkdtempSync(require
 // Lógica do scanner sem rede (velas sintéticas). Não valida a integração real com a Deriv.
 const test = require('node:test');
 const assert = require('node:assert');
+require('../server/research').clock.now = () => Date.UTC(2026, 9, 26, 13) / 1000; // horário com forex aberto na Deriv
 const { Scanner } = require('../server/scanner');
 const prob = require('../server/probability');
 
@@ -26,24 +27,26 @@ test('scanner: preliminar → confirmado → resultado, em todas as expirações
   const st = ready(sc, 'frxGBPUSD', '5m', 300);
   sc._live(st);
   const pre = opps.filter(o => o.stage === 'preliminar');
-  assert.deepStrictEqual(pre.map(o => o.expiryMin).sort(), [15, 5], 'avisa 5 e 15 min');
+  assert.deepStrictEqual(pre.map(o => o.expiryMin), [15], 'forex: só 15 min (regra da Deriv)');
   assert.ok(pre.every(o => o.direction === 'CALL' && o.p >= 0.56 && o.lo > 0.5 && o.name === 'GBP/USD'));
   st._at = 0; sc._live(st);
-  assert.strictEqual(opps.filter(o => o.stage === 'preliminar').length, 2, 'não repete na mesma vela');
+  assert.strictEqual(opps.filter(o => o.stage === 'preliminar').length, 1, 'não repete na mesma vela');
   // vela fecha → confirmação com a vela fechada
   const last = st.candles.at(-1);
   sc._onOhlc({ symbol: 'frxGBPUSD', granularity: 300, open_time: last.epoch + 300, open: last.close, high: last.close, low: last.close, close: last.close });
   const conf = opps.filter(o => o.stage === 'confirmado');
-  assert.strictEqual(conf.length, 2);
+  assert.strictEqual(conf.length, 1);
   assert.ok(conf[0].entryUntil - conf[0].candleOpen === 30, 'janela de entrada = 10% da vela');
-  assert.strictEqual(recs.size, 2, 'sinais registrados para o relatório');
-  // vela de expiração (5 min) fecha → resultado observado
-  const c2 = st.candles.at(-1);
-  sc._onOhlc({ symbol: 'frxGBPUSD', granularity: 300, open_time: c2.epoch, open: c2.open, high: c2.open + 2, low: c2.open, close: c2.open + 2 });
-  sc._onOhlc({ symbol: 'frxGBPUSD', granularity: 300, open_time: c2.epoch + 300, open: c2.open + 2, high: c2.open + 2, low: c2.open + 2, close: c2.open + 2 });
-  const five = [...recs.values()].find(r => r.expiryMin === 5);
-  assert.strictEqual(five.outcome, 'favorável');
-  assert.strictEqual([...recs.values()].find(r => r.expiryMin === 15).outcome, undefined, '15 min ainda aberto');
+  assert.strictEqual(recs.size, 1, 'sinal registrado para o relatório');
+  // 15 min = 3 velas de 5 min: resultado só depois que a 3ª fechar
+  const rec = () => [...recs.values()][0];
+  for (let k = 0; k < 3; k++) {
+    const c2 = st.candles.at(-1);
+    sc._onOhlc({ symbol: 'frxGBPUSD', granularity: 300, open_time: c2.epoch, open: c2.open, high: c2.open + 2, low: c2.open, close: c2.open + 2 });
+    sc._onOhlc({ symbol: 'frxGBPUSD', granularity: 300, open_time: c2.epoch + 300, open: c2.open + 2, high: c2.open + 2, low: c2.open + 2, close: c2.open + 2 });
+    if (k < 2) assert.strictEqual(rec().outcome, undefined, 'ainda aberto');
+  }
+  assert.strictEqual(rec().outcome, 'favorável');
 });
 
 test('scanner: dados atrasados ou mercado aberto no painel não geram aviso', () => {

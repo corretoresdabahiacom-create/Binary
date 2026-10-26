@@ -152,9 +152,22 @@ function loadResearch() {
 function artifact(sym, tf, exp) { const r = loadResearch(); return r && r.combos ? r.combos[`${sym}|${tf}|${exp}`] || null : null; }
 function saveResearch(obj) { fs.mkdirSync(DATA_DIR(), { recursive: true }); fs.writeFileSync(RESEARCH_FILE(), JSON.stringify(obj)); cache = null; }
 
+// Regras de contrato da Deriv (consultadas em contracts_for): Rise/Fall de forex só a partir de 15 min de
+// duração e sem negociação entre 20:50 e 22:00 UTC. Sinais fora disso não são operáveis.
+const isForex = sym => /^frx/.test(sym);
+const clock = { now: () => Date.now() / 1000 };            // injetável nos testes
+function contractRules(sym) { return { expiries: isForex(sym) ? [15] : [5, 15] }; }
+function tradeable(sym, epoch) {
+  if (!isForex(sym)) return true;
+  const d = new Date(epoch * 1000), m = d.getUTCHours() * 60 + d.getUTCMinutes();
+  return !(m >= 20 * 60 + 50 && m < 22 * 60);
+}
+
 // Regra ao vivo: v2 (calibração + meta + VE + aprovação) quando há data/research.json; senão a regra v1.
 function liveDecision(candles, i, est, combo, cfg, fresh) {
   if (!fresh) return { ok: false, reason: 'dados atrasados' };
+  if (!contractRules(combo.symbol).expiries.includes(+combo.expiryMin)) return { ok: false, reason: `a Deriv não oferece expiração de ${combo.expiryMin} min neste mercado (mínimo 15)` };
+  if (!tradeable(combo.symbol, clock.now())) return { ok: false, reason: 'forex sem negociação na Deriv entre 20:50 e 22:00 UTC' };
   if (!est) return { ok: false, reason: 'indicadores insuficientes' };
   if (est.n < cfg.minSamples) return { ok: false, reason: `amostra pequena (${est.n})`, direction: est.direction, p: est.p };
   if (!loadResearch()) {
@@ -167,5 +180,5 @@ function liveDecision(candles, i, est, combo, cfg, fresh) {
   return { ok: d.ok, version: 'v2', approved: !!art.approved, direction: d.direction, p: d.q, ev: d.ev, be: d.be, reason: d.reason };
 }
 
-module.exports = { liveDecision, fitIsotonic, applyIsotonic, session, SESSIONS, features, FEATURE_NAMES, fitLogistic, predictLogistic, sigmoid,
+module.exports = { clock, liveDecision, contractRules, tradeable, fitIsotonic, applyIsotonic, session, SESSIONS, features, FEATURE_NAMES, fitLogistic, predictLogistic, sigmoid,
   decide, binomTailP, benjaminiHochberg, loadResearch, artifact, saveResearch, RESEARCH_FILE };

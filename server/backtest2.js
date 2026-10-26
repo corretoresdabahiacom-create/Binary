@@ -45,7 +45,7 @@ function stats(tr, payout) {
     pValue: R.binomTailP(w, n, be) };
 }
 
-function evaluateCombo(c, { gran, expiryMin, payout = 0.95, minProb = 0.56, minSamples = 40, edgeMargin = 0.02, start = 3000, fold = 1000 } = {}) {
+function evaluateCombo(c, { symbol = '', gran, expiryMin, payout = 0.95, minProb = 0.56, minSamples = 40, edgeMargin = 0.02, start = 3000, fold = 1000 } = {}) {
   const h = expiryMin * 60 / gran;
   if (!Number.isInteger(h) || h < 1) return null;
   const emb = h + 2;
@@ -57,6 +57,7 @@ function evaluateCombo(c, { gran, expiryMin, payout = 0.95, minProb = 0.56, minS
       const e = estimate(art.model, c, t, minSamples); if (!e) continue;
       const d = c[t + h].close - c[t].close; if (d === 0) continue;
       const up = d > 0;
+      if (!R.tradeable(symbol, c[t].epoch + gran)) continue;          // horário sem negociação na Deriv
       if (t >= nextRaw && e.n >= minSamples && e.p >= minProb && e.lo > 0.5) {       // regra v1 (atual)
         const win = (e.direction === 'CALL') === up; raw.push({ t, win }); nextRaw = t + h;
         const s = R.session(c[t].epoch); (bySession[s] = bySession[s] || []).push({ win });

@@ -4,6 +4,7 @@ process.env.DATA_DIR = process.env.DATA_DIR || require('fs').mkdtempSync(require
 delete process.env.TRADING_ENABLED;
 const test = require('node:test');
 const assert = require('node:assert');
+require('../server/research').clock.now = () => Date.UTC(2026, 9, 26, 13) / 1000; // horário com forex aberto na Deriv
 const { startMock } = require('./mock');
 
 let shared = null; // a URL da Deriv é lida uma vez por processo: um único servidor simulado

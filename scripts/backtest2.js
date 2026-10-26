@@ -26,11 +26,11 @@ async function payoutOf(sock, sym, exp) {
   const results = {}, meta = {};
   for (const sym of syms) for (const tf of tfs) {
     const c = await fetchHistory(sock, sym, TFS[tf], 2, () => {}, 10000);
-    for (const exp of EXPIRIES) {
+    for (const exp of require('../server/research').contractRules(sym).expiries) {
       const key = `${sym}|${tf}|${exp}`;
       const pay = await payoutOf(sock, sym, exp);
       const t = Date.now();
-      const r = evaluateCombo(c, { gran: TFS[tf], expiryMin: exp, payout: pay.payout });
+      const r = evaluateCombo(c, { symbol: sym, gran: TFS[tf], expiryMin: exp, payout: pay.payout });
       if (!r) continue;
       r.payoutSource = pay.source; r.candles = c.length; r.from = c[0].epoch; r.to = c.at(-1).epoch;
       results[key] = r;

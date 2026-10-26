@@ -31,7 +31,7 @@ class Engine extends EventEmitter {
     this.serverOffset = 0;        // segundos (hora Deriv - hora local)
     this.mode = 'manual';         // manual | auto | catalog
     this.running = false;
-    this.cfg = { stake: 1, minConfidence: 0.7, maxLoss: 10, maxConsecLosses: 3, maxTrades: 20, windowPct: 0.1, expiryMin: 5, maxDataAgeSec: 20, minProb: 0.56, minSamples: 40, edgeMargin: 0.02, allowUnapproved: 0 };
+    this.cfg = { stake: 1, minConfidence: 0.7, maxLoss: 10, maxConsecLosses: 3, maxTrades: 20, windowPct: 0.1, expiryMin: 15, maxDataAgeSec: 20, minProb: 0.56, minSamples: 40, edgeMargin: 0.02, allowUnapproved: 0 };
     this.hist = [];               // histórico longo de velas fechadas (Deriv)
     this.model = null;            // tabela de probabilidade
     this.prob = null;             // estimativa ao vivo

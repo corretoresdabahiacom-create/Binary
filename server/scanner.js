@@ -59,7 +59,7 @@ class Scanner extends EventEmitter {
     const m = new Map(h.concat(st.candles.slice(0, -1)).map(c => [c.epoch, c]));
     st.hist = [...m.values()].filter(c => c.epoch !== forming).sort((a, b) => a.epoch - b.epoch);
     st.models = {};
-    for (const exp of EXPIRIES) {
+    for (const exp of research.contractRules(st.sym).expiries) {
       const hz = exp * 60 / st.gran;
       if (Number.isInteger(hz) && hz >= 1) st.models[exp] = prob.buildModel(st.hist, hz);
     }
@@ -148,7 +148,7 @@ class Scanner extends EventEmitter {
 
   view() {
     const nowMs = Date.now(), out = [];
-    for (const st of this.streams.values()) for (const exp of EXPIRIES) {
+    for (const st of this.streams.values()) for (const exp of research.contractRules(st.sym).expiries) {
       const hz = exp * 60 / st.gran; if (!Number.isInteger(hz) || hz < 1) continue;
       const l = st.last[exp] || {};
       out.push({ symbol: st.sym, name: this.name(st.sym), tf: st.tf, expiryMin: exp, loaded: st.loaded, fresh: !!this.fresh(st, nowMs),

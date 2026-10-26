@@ -76,3 +76,12 @@ test('decisão ao vivo: sem research usa v1; não aprovada bloqueia; liberar per
   assert.strictEqual(R.liveDecision(c, 399, est, { symbol: 'R_10', tf: '5m', expiryMin: 5 }, cfg, false).ok, false, 'dado atrasado');
   require('fs').unlinkSync(R.RESEARCH_FILE());
 });
+
+test('regras da Deriv para forex: só 15 min e sem negociação 20:50–22:00 UTC', () => {
+  assert.deepStrictEqual(R.contractRules('frxEURUSD').expiries, [15]);
+  assert.strictEqual(R.tradeable('frxEURUSD', Date.UTC(2026, 9, 26, 21, 0) / 1000), false);
+  assert.strictEqual(R.tradeable('frxEURUSD', Date.UTC(2026, 9, 26, 13, 0) / 1000), true);
+  const est = { pCall: 0.7, pPut: 0.3, p: 0.7, direction: 'CALL', n: 200, lo: 0.6, hi: 0.8, level: 'estado completo' };
+  const d = R.liveDecision([], 0, est, { symbol: 'frxEURUSD', tf: '5m', expiryMin: 5 }, { minSamples: 40, minProb: 0.56 }, true);
+  assert.strictEqual(d.ok, false); assert.match(d.reason, /mínimo 15/);
+});
