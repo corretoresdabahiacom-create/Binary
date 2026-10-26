@@ -1,4 +1,5 @@
 'use strict';
+process.env.DATA_DIR = process.env.DATA_DIR || require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'tac-test-')); // testes nunca tocam data/ real
 // Regras do MVP "só análise". Usa o servidor Deriv SIMULADO (test/mock.js) — não valida a integração real.
 delete process.env.TRADING_ENABLED;
 const test = require('node:test');

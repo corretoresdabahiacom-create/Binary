@@ -6,14 +6,20 @@ const fs = require('fs');
 const { WebSocketServer } = require('ws');
 const { Engine } = require('./engine');
 const { createGuard } = require('./access');
+const { Scanner, NAMES } = require('./scanner');
 
 const PORT = Number(process.env.PORT || 3010); // 3000 costuma estar ocupada (ex.: Tailscale)
 const HOST = '127.0.0.1'; // nunca exponha: o servidor guarda tokens de negociação
-const CONFIG = path.join(__dirname, '..', 'data', 'config.json');
+const CONFIG = path.join(process.env.DATA_DIR || path.join(__dirname, '..', 'data'), 'config.json');
 
 try { for (const l of fs.readFileSync(path.join(__dirname, '..', '.env'), 'utf8').split('\n')) { const m = l.match(/^\s*([A-Z_]+)\s*=\s*(.*)\s*$/); if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, ''); } } catch {}
 
 const engine = new Engine();
+const scanner = process.env.SCANNER === '0' ? null : new Scanner({
+  getCfg: () => engine.cfg,
+  isActive: (sym, tf, exp) => engine.symbol === sym && engine.tf === tf && engine.cfg.expiryMin === exp,
+  record: sig => engine._record(sig),
+});
 const guard = process.env.CF_ACCESS_TEAM_DOMAIN && process.env.CF_ACCESS_AUD
   ? createGuard({ teamDomain: process.env.CF_ACCESS_TEAM_DOMAIN, aud: process.env.CF_ACCESS_AUD }) : null;
 const app = express();
@@ -23,6 +29,7 @@ app.use(express.static(path.join(__dirname, '..', 'public')));
 app.get('/api/trades', (req, res) => res.json(engine.trades.slice(-200)));
 app.get('/api/signals', (req, res) => res.json({ stats: engine.signalStats(), signals: engine.signals.slice(-200) }));
 app.get('/api/probability', (req, res) => res.json({ prob: engine.prob, model: engine.publicState().model, cfg: { minProb: engine.cfg.minProb, minSamples: engine.cfg.minSamples, expiryMin: engine.cfg.expiryMin, tf: engine.tf } }));
+app.get('/api/scan', (req, res) => res.json(scanner ? scanner.view() : []));
 app.get('/api/status', (req, res) => res.json(engine.publicState()));
 const server = http.createServer(app);
 
@@ -43,6 +50,11 @@ const bcast = (type, data) => { const s = JSON.stringify({ type, data }); for (c
 for (const ev of ['state', 'candles', 'candle', 'signal', 'trade_open', 'trade_update', 'trade_closed', 'log', 'alert', 'catalog_progress', 'catalog', 'notify', 'prob'])
   engine.on(ev, d => bcast(ev, d));
 engine.on('trade_closed', () => bcast('diagnostics', engine.diagnostics()));
+if (scanner) {
+  scanner.on('opportunity', o => bcast('opportunity', o));
+  scanner.on('log', m => engine.log(m, 'warn'));
+  setInterval(() => { if (clients.size) bcast('scan', scanner.view()); }, 2000).unref();
+}
 
 function saveConfig(c) {
   fs.mkdirSync(path.dirname(CONFIG), { recursive: true });
@@ -67,6 +79,13 @@ const handlers = {
     await engine.selectAccount(d.id);
   },
   async market(d) { await engine.setMarket(d.symbol, d.tf); },
+  // Vai para a oportunidade indicada pelo scanner: ativo + gráfico + expiração.
+  async goto(d) {
+    if (!d.symbol || !d.tf || !d.expiryMin) throw new Error('oportunidade inválida');
+    await engine.setMarket(d.symbol, d.tf);
+    engine.setConfig({ expiryMin: d.expiryMin });
+    engine.log(`Painel movido para ${NAMES[d.symbol] || d.symbol} · ${d.tf} · expiração ${d.expiryMin} min`, 'ok');
+  },
   async config(d) { engine.setConfig(d); },
   async buy(d) {
     if (engine.account && engine.account.account_type === 'real' && !d.confirmReal) throw new Error('confirme a operação REAL');
@@ -111,6 +130,9 @@ wss.on('connection', ws => {
 server.listen(PORT, HOST, async () => {
   console.log(`Deriv MVP em http://localhost:${PORT}`);
   try { await engine.startPublic(); console.log('Fonte de dados: Deriv (pública) conectada'); } catch (e) { console.log('Fonte de dados indisponível:', e.message); }
+  const startScan = () => scanner.start().then(() => console.log('Scanner multi-mercado ativo'))
+    .catch(e => { console.log('Scanner indisponível:', e.message, '— nova tentativa em 15 s'); scanner.stop(); setTimeout(startScan, 15000).unref(); });
+  if (scanner) startScan();
   const saved = loadConfig();
   if (saved && saved.token && saved.appId) {
     try { await connectWith(saved); console.log('Reconectado com credenciais salvas'); }

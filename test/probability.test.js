@@ -1,4 +1,5 @@
 'use strict';
+process.env.DATA_DIR = process.env.DATA_DIR || require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'tac-test-')); // testes nunca tocam data/ real
 const test = require('node:test');
 const assert = require('node:assert');
 const { buildModel, estimate, wilson } = require('../server/probability');

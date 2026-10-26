@@ -8,8 +8,8 @@ const { askClaude } = require('./claude');
 const catalogLib = require('./catalog');
 const prob = require('./probability');
 
-const TRADES_FILE = path.join(__dirname, '..', 'data', 'trades.json');
-const SIGNALS_FILE = path.join(__dirname, '..', 'data', 'signals.json');
+const TRADES_FILE = path.join(process.env.DATA_DIR || path.join(__dirname, '..', 'data'), 'trades.json');
+const SIGNALS_FILE = path.join(process.env.DATA_DIR || path.join(__dirname, '..', 'data'), 'signals.json');
 const GRANS = { '5m': 300, '15m': 900, '1h': 3600 };
 const EXPIRIES = [5, 15];                      // minutos; independente do timeframe
 const STRATEGY = 'indicadores-v1';

@@ -72,6 +72,10 @@ th{color:var(--mute);font-weight:500;font-size:12px} td.num,th.num{text-align:ri
 .warnbox{border:1px solid var(--warn);background:#2a2110;color:#f3d28a;border-radius:8px;padding:10px 12px;font-size:12.5px;line-height:1.5}
 #toast{position:fixed;right:16px;bottom:16px;display:flex;flex-direction:column;gap:8px;z-index:20}
 #toast div{background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--accent);padding:10px 14px;border-radius:8px;max-width:360px}
+.opp{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;background:var(--panel2);margin-top:6px;border-left:4px solid var(--mute)}
+.opp.call{border-left-color:#26a69a} .opp.put{border-left-color:#ef5350} .opp.conf{outline:2px solid #ffd666}
+.opp b{min-width:64px} .opp .go{margin-left:auto;width:auto;padding:6px 14px}
+#toast div.act{cursor:pointer;border-left-color:#ffd666;font-weight:600} #toast div.act:hover{filter:brightness(1.2)}
 #toast div.error{border-left-color:var(--down)} #toast div.ok{border-left-color:var(--up)} #toast div.warn{border-left-color:var(--warn)}
 .modal{position:fixed;inset:0;background:#000a;display:none;align-items:center;justify-content:center;z-index:30}
 .modal.on{display:flex} .modal .box{background:var(--panel);border:1px solid var(--real);border-radius:12px;padding:20px;max-width:420px}
@@ -112,6 +116,12 @@ details summary{cursor:pointer;color:var(--mute);font-size:12px;text-transform:u
           <span class="tag" id="clock">—</span>
         </div>
         <div id="chart"></div>
+      </div>
+      <div class="card" style="margin-top:14px">
+        <h3>Scanner — probabilidade de entrada em todos os mercados</h3>
+        <div class="hint" id="scanSum">Iniciando scanner…</div>
+        <div id="scanList"></div>
+        <p class="hint">Mesmo modelo e mesmos filtros do painel. Clique em <b>Ir</b> para abrir o mercado; a confirmação chega no fechamento da vela.</p>
       </div>
       <div id="openBox"></div>
       <div class="card" style="margin-top:14px">
@@ -334,6 +344,8 @@ const on = {
   candles(d) { candles = d.candles; series.setData(candles.map(c => ({ time: c.epoch, open: c.open, high: c.high, low: c.low, close: c.close }))); chart.timeScale().scrollToRealTime(); drawMarkers(); },
   candle(c) { ageBase = Date.now(); series.update({ time: c.epoch, open: c.open, high: c.high, low: c.low, close: c.close }); },
   prob(p) { renderProb(p); },
+  opportunity(o) { onOpportunity(o); loadSignals(); },
+  scan(l) { renderScan(l); },
   notify(n) { notifyUser(n); loadSignals(); },
   signal(s) { signal = s && s.status === 'valido' ? s : null; renderBig(); renderSignal(); drawMarkers(); if (s && s.status === 'valido') toast(`Sinal ${s.direction === 'CALL' ? 'de COMPRA' : 'de VENDA'}${s.confidence != null ? ' · ' + Math.round(s.confidence * 100) + '%' : ''}`, s.direction === 'CALL' ? 'ok' : 'warn'); },
   trade_open(o) { open = o; renderOpen(); drawMarkers(); },
@@ -385,6 +397,32 @@ function renderBig() {
   el.className = 'big wait';
   const why = !S ? 'conectando…' : S.dataState !== 'ok' ? 'dados ' + S.dataState : (p && p.reason) || 'sem vantagem estatística';
   el.innerHTML = `<div class="t">AGUARDAR</div>${p && p.pCall != null ? `<div class="p">CALL ${pct(p.pCall)} · PUT ${pct(p.pPut)}</div>` : ''}<div class="s">${esc(why)}</div>`;
+}
+const TFL = { '5m': '5 min', '15m': '15 min', '1h': '1 hora' };
+function oppText(o) { return `${o.name} · gráfico ${TFL[o.tf]} · expiração ${o.expiryMin} min · ${o.direction} ${(o.p * 100).toFixed(1)}%`; }
+function gotoOpp(o) {
+  if (!$('#symbol').querySelector(`option[value="${o.symbol}"]`)) { const op = document.createElement('option'); op.value = o.symbol; op.textContent = o.name || o.symbol; $('#symbol').append(op); }
+  call('goto', { symbol: o.symbol, tf: o.tf, expiryMin: o.expiryMin }).then(() => { switchView('trade'); window.scrollTo({ top: 0, behavior: 'smooth' }); toast('Painel em ' + o.name + ' · ' + TFL[o.tf] + ' · exp. ' + o.expiryMin + ' min', 'ok'); }).catch(() => {});
+}
+function actionToast(msg, fn) { const d = document.createElement('div'); d.className = 'act'; d.textContent = msg + '  → clique para ir'; d.onclick = () => { fn(); d.remove(); }; $('#toast').append(d); setTimeout(() => d.remove(), 20000); }
+function onOpportunity(o) {
+  const head = o.stage === 'confirmado' ? 'ENTRE AGORA (confirmado)' : 'Probabilidade de entrada';
+  const text = `${head}: ${oppText(o)}`;
+  if ($('#nOn').checked) beep(o.stage === 'confirmado' ? 988 : 660);
+  if ($('#nOn').checked && 'Notification' in window && Notification.permission === 'granted') {
+    const n = new Notification('Trade AI Core — ' + head, { body: oppText(o) + (o.stage === 'confirmado' ? '\nJanela de entrada curta.' : '\nClique para abrir este mercado.'), tag: o.symbol + o.tf + o.expiryMin + o.stage, requireInteraction: true });
+    n.onclick = () => { window.focus(); gotoOpp(o); n.close(); };
+  }
+  actionToast(text, () => gotoOpp(o));
+}
+function renderScan(list) {
+  const ready = list.filter(x => x.loaded).length, fresh = list.filter(x => x.fresh).length;
+  $('#scanSum').textContent = `${list.length} combinações monitoradas · ${ready} com modelo pronto · ${fresh} com dados frescos (forex fecha no fim de semana)`;
+  const ok = list.filter(x => x.ok).sort((a, b) => b.p - a.p);
+  $('#scanList').innerHTML = ok.length ? ok.map((x, i) => `<div class="opp ${x.direction === 'CALL' ? 'call' : 'put'} ${x.stage === 'confirmado' ? 'conf' : ''}">
+      <b>${x.direction === 'CALL' ? 'CALL ▲' : 'PUT ▼'}</b><span><b>${esc(x.name)}</b> · ${TFL[x.tf]} · exp. ${x.expiryMin} min<br><span class="hint">${(x.p * 100).toFixed(1)}% · ${x.n} casos · ${x.stage}</span></span>
+      <button class="btn primary go" data-i="${i}">Ir</button></div>`).join('') : '<div class="hint" style="margin-top:6px">Nenhum mercado com probabilidade suficiente agora — AGUARDAR.</div>';
+  $('#scanList').querySelectorAll('.go').forEach(b => b.onclick = () => gotoOpp(ok[+b.dataset.i]));
 }
 function now() { return Date.now() / 1000 + offset; }
 let ageBase = null, audio = null;

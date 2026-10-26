@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const { computeSeries, snapshot } = require('./indicators');
 
-const DATA_DIR = path.join(__dirname, '..', 'data');
+const DATA_DIR = (process.env.DATA_DIR || path.join(__dirname, '..', 'data'));
 
 // ---------- Estatística ----------
 function wilsonLower(wins, n, z = 1.96) {

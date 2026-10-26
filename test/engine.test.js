@@ -1,4 +1,5 @@
 'use strict';
+process.env.DATA_DIR = process.env.DATA_DIR || require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'tac-test-')); // testes nunca tocam data/ real
 // Servidor Deriv SIMULADO apenas para testar o protocolo do cliente. O produto real nunca usa isto.
 process.env.TRADING_ENABLED = '1'; // estes testes exercitam o caminho de ordens (desligado por padrão)
 const test = require('node:test');
