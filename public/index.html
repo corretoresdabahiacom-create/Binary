@@ -113,10 +113,16 @@ details summary{cursor:pointer;color:var(--mute);font-size:12px;text-transform:u
     <div>
       <div class="card">
         <div class="warnbox" id="modeBanner" style="margin-bottom:10px">MODO SÓ ANÁLISE — o app não envia ordens. Você decide e opera manualmente na corretora.</div>
-        <h3>Sinal para a próxima vela</h3>
+        <h3>Probabilidade ao vivo</h3>
+        <div id="prob" class="hint">Carregando histórico da Deriv para o modelo…</div>
+        <div class="row" style="margin-top:8px;gap:8px">
+          <div style="flex:1"><label>Prob. mínima (%)</label><input type="number" id="minProb" min="50" max="95" step="1" value="56"></div>
+          <div style="flex:1"><label>Amostra mínima</label><input type="number" id="minSamples" min="10" step="10" value="40"></div>
+        </div>
+        <h3 style="margin-top:14px">Sinal para a próxima vela</h3>
         <label>Expiração pretendida (independente do timeframe)</label>
         <div class="seg" id="exp" style="width:100%"><button data-e="5" class="on" style="flex:1">5 min</button><button data-e="15" style="flex:1">15 min</button></div>
-        <div class="signal" id="signal"><div class="none">Aguardando confluência de padrões e indicadores…</div></div>
+        <div class="signal" id="signal"><div class="none">Sem sinal confirmado — AGUARDAR</div></div>
       </div>
 
       <div class="card" style="margin-top:14px">
@@ -126,6 +132,8 @@ details summary{cursor:pointer;color:var(--mute);font-size:12px;text-transform:u
         <div class="stat"><span>Estado dos dados</span><b id="dState">—</b></div>
         <div class="stat"><span>Idade do último dado</span><b id="dAge">—</b></div>
         <div class="stat"><span>Último preço</span><b id="dPrice">—</b></div>
+        <div class="stat"><span>Atraso do tick (≈, resolução 1 s)</span><b id="dTick">—</b></div>
+        <div class="stat"><span>Modelo</span><b id="dModel">—</b></div>
         <div class="stat"><span>Sincronização com o gráfico da corretora</span><b>Não validada</b></div>
         <p class="hint" id="dBlock"></p>
         <p class="hint">Não há acesso programático ao OHLC exibido pela corretora; compare visualmente. Sinais só são emitidos com dados frescos da Deriv.</p>
@@ -303,13 +311,18 @@ const on = {
     $('#dSrc').textContent = s.source; $('#dMkt').textContent = s.symbol + ' · ' + s.market + ' · ' + s.tf;
     const lbl = { ok: '● OK', desatualizado: '▲ DESATUALIZADO', desconectado: '✕ DESCONECTADO' };
     $('#dState').textContent = lbl[s.dataState] || s.dataState; $('#dState').className = s.dataState === 'ok' ? 'pos' : 'neg';
+    $('#dTick').textContent = s.tickLatencyMs == null ? '—' : s.tickLatencyMs + ' ms';
+    $('#dModel').textContent = s.model ? `${s.model.samples} amostras · ${s.model.horizon} vela(s)` : 'indisponível';
+    for (const [id, k, f] of [['minProb', 'minProb', 100], ['minSamples', 'minSamples', 1]]) if (document.activeElement !== $('#' + id)) $('#' + id).value = Math.round(s.cfg[k] * f);
+    if (s.prob) renderProb(s.prob);
     $('#dPrice').textContent = s.lastPrice == null ? '—' : (+s.lastPrice).toFixed(5);
     $('#dBlock').textContent = s.blockReason ? 'Sinais suspensos: ' + s.blockReason : '';
     ageBase = s.dataAgeMs == null ? null : Date.now() - s.dataAgeMs;
     if (!s.connected && !s.tradingEnabled) {} else if (!s.connected && s.tradingEnabled) switchView('conn');
   },
   candles(d) { candles = d.candles; series.setData(candles.map(c => ({ time: c.epoch, open: c.open, high: c.high, low: c.low, close: c.close }))); chart.timeScale().scrollToRealTime(); drawMarkers(); },
-  candle(c) { series.update({ time: c.epoch, open: c.open, high: c.high, low: c.low, close: c.close }); },
+  candle(c) { ageBase = Date.now(); series.update({ time: c.epoch, open: c.open, high: c.high, low: c.low, close: c.close }); },
+  prob(p) { renderProb(p); },
   notify(n) { notifyUser(n); loadSignals(); },
   signal(s) { signal = s && s.status === 'valido' ? s : null; renderSignal(); drawMarkers(); if (s && s.status === 'valido') toast(`Sinal ${s.direction === 'CALL' ? 'de COMPRA' : 'de VENDA'}${s.confidence != null ? ' · ' + Math.round(s.confidence * 100) + '%' : ''}`, s.direction === 'CALL' ? 'ok' : 'warn'); },
   trade_open(o) { open = o; renderOpen(); drawMarkers(); },
@@ -324,6 +337,19 @@ const on = {
 };
 
 // ---------- Renderização ----------
+function renderProb(p) {
+  const el = $('#prob');
+  if (!p || p.pCall == null) { el.innerHTML = `<b>AGUARDAR</b> — ${esc((p && p.reason) || 'sem estimativa')}`; return; }
+  const c = Math.round(p.pCall * 1000) / 10, v = Math.round(p.pPut * 1000) / 10;
+  const tag = { preliminar: '◐ PRELIMINAR (vela em formação)', confirmado: '● CONFIRMADO', AGUARDAR: '○ AGUARDAR' }[p.stage] || p.stage;
+  el.innerHTML = `<div style="display:flex;height:22px;border-radius:6px;overflow:hidden;font-size:12px;font-weight:700;color:#fff">
+      <div style="width:${c}%;background:#26a69a;display:flex;align-items:center;padding-left:6px">CALL ${c}%</div>
+      <div style="width:${v}%;background:#ef5350;display:flex;align-items:center;justify-content:flex-end;padding-right:6px">PUT ${v}%</div></div>
+    <div style="margin-top:6px"><b>${tag}</b></div>
+    <div>${p.n} casos semelhantes · nível: ${esc(p.level)} · IC95% ${(p.lo * 100).toFixed(1)}–${(p.hi * 100).toFixed(1)}%</div>
+    ${p.stage === 'AGUARDAR' ? `<div>Motivo: ${esc(p.reason || '')}</div>` : ''}
+    <div>Horizonte: ${p.horizon} vela(s) · estimativa estatística do histórico, não garantia.</div>`;
+}
 function now() { return Date.now() / 1000 + offset; }
 let ageBase = null, audio = null;
 function beep(f) { try { audio = audio || new AudioContext(); const o = audio.createOscillator(), g = audio.createGain(); o.frequency.value = f; g.gain.value = .15; o.connect(g).connect(audio.destination); o.start(); o.stop(audio.currentTime + .25); } catch {} }
@@ -342,13 +368,13 @@ async function loadSignals() {
 }
 function renderSignal() {
   const el = $('#signal');
-  if (!signal || now() >= signal.expiresAt) { el.className = 'signal'; el.innerHTML = '<div class="none">Aguardando confluência de padrões e indicadores…</div>'; return; }
+  if (!signal || now() >= signal.expiresAt) { el.className = 'signal'; el.innerHTML = '<div class="none">Sem sinal confirmado — AGUARDAR</div>'; return; }
   const up = signal.direction === 'CALL', left = Math.max(0, Math.round(signal.expiresAt - now()));
   const total = Math.max(1, signal.expiresAt - signal.candleOpen);
   el.className = 'signal ' + (up ? 'call' : 'put');
   el.innerHTML = `<div class="dir">${up ? 'COMPRA ▲' : 'VENDA ▼'}</div>
     <div class="meta">${signal.symbol} · gráfico ${signal.tf} · expiração ${signal.expiryMin} min · válido para entrada por <b>${left}s</b> · dado com ${signal.dataAgeMs} ms</div>
-    <div class="meta">${signal.confidence != null ? 'Probabilidade estimada pela Claude: <b>' + Math.round(signal.confidence * 100) + '%</b>' : 'Sem validação da Claude (chave não configurada)'}</div>
+    <div class="meta">${signal.confidence != null ? 'Probabilidade estimada: <b>' + Math.round(signal.confidence * 100) + '%</b>' : '—'}</div>
     <div class="meta">${esc(signal.reason || '')}</div>
     ${signal.rule ? `<div class="meta">Catálogo: ${(signal.rule.rate * 100).toFixed(0)}% fora da amostra (${signal.rule.n} casos)</div>` : ''}
     <div class="meta">Entrar nos próximos <b>${left}s</b></div>
@@ -467,6 +493,8 @@ fetch('/api/trades').then(r => r.json()).then(t => { trades = t; renderTrades();
 setInterval(() => { renderSignal(); if (open) renderOpen(); if (signal && now() >= signal.expiresAt) drawMarkers(); if (ageBase != null) $('#dAge').textContent = ((Date.now() - ageBase) / 1000).toFixed(1) + ' s'; $('#clock').textContent = new Date(now() * 1000).toLocaleTimeString('pt-BR'); }, 1000);
 connect();
 document.querySelectorAll('#exp button').forEach(b => b.onclick = () => call('config', { expiryMin: +b.dataset.e }).catch(() => {}));
+$('#minProb').onchange = () => call('config', { minProb: +$('#minProb').value / 100 }).catch(() => {});
+$('#minSamples').onchange = () => call('config', { minSamples: +$('#minSamples').value }).catch(() => {});
 $('#maxAge').onchange = () => call('config', { maxDataAgeSec: +$('#maxAge').value }).catch(() => {});
 $('#nOn').onchange = () => { if ($('#nOn').checked && 'Notification' in window && Notification.permission === 'default') Notification.requestPermission(); };
 document.addEventListener('click', () => { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission(); }, { once: true });

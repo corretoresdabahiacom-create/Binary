@@ -11,6 +11,11 @@ Monitor de mercado para **decisão manual**: o app mostra o gráfico, emite CALL
 - Gráfico de velas **5 min / 15 min / 1 h**; **expiração 5 ou 15 min** escolhida à parte do timeframe.
 - **Diagnóstico da fonte:** estado (OK / DESATUALIZADO / DESCONECTADO), idade do último dado, último preço.
 - **Trava de qualidade:** se o dado passar do limite de idade (padrão 20 s) ou a conexão cair, o sinal vigente é **invalidado** e nenhum sinal novo sai até os dados voltarem.
+- **Probabilidade em tempo real (CALL/PUT):** ao abrir o ativo, o app baixa até 10.000 velas da Deriv e mede, para o estado técnico atual (RSI, tendência EMA, momento MACD, Bandas de Bollinger), quantas vezes o preço subiu ou caiu até a expiração escolhida. A barra CALL/PUT atualiza a cada tick (no máx. 1×/s). Mostra nº de casos, intervalo de confiança 95% e o nível usado (se o estado exato tem poucos casos, recua para um estado mais geral).
+  - **PRELIMINAR** (vela em formação; alerta quando passa da metade da vela) → **CONFIRMADO** no fechamento → entrada na vela seguinte.
+  - Sinal só sai com: probabilidade ≥ mínimo (padrão 56%), ≥ 40 casos, IC95% inteiro acima de 50% e dados frescos. Caso contrário: **AGUARDAR** com o motivo.
+  - Expiração precisa ser múltipla do gráfico (ex.: gráfico 15 min + expiração 5 min = indisponível).
+  - Em índices sintéticos (gerador aleatório) o esperado é quase sempre AGUARDAR — isso é o modelo funcionando, não defeito.
 - **Ciclo do sinal:** válido → expirado (janela de entrada acabou) ou invalidado (com motivo). Tudo gravado em `data/signals.json` com ativo, timeframe, expiração, estratégia, horário e idade do dado.
 - **Resultado observado:** após a vela de expiração fechar, compara fechamento vs. preço de abertura do sinal (favorável / desfavorável / empate). Nunca usa dados futuros.
 - **Alertas no Windows** (notificação do navegador + som) para sinal, invalidação, dados atrasados e retomada. Permita notificações quando o navegador pedir.
@@ -23,7 +28,7 @@ Monitor de mercado para **decisão manual**: o app mostra o gráfico, emite CALL
 - **Celular:** sem push. Acesso remoto só via túnel (ver seção Cloudflare abaixo); o monitor depende do PC ligado.
 - Sinais vêm de regras de indicadores (`indicadores-v1`) sem vantagem comprovada. Nada aqui é promessa de lucro ou taxa de acerto.
 
-**Testes:** `npm test` (18 testes; usam um servidor Deriv **simulado** — validam a lógica, não a integração real).
+**Testes:** `npm test` (25 testes; usam um servidor Deriv **simulado** — validam a lógica, não a integração real).
 
 ---
 

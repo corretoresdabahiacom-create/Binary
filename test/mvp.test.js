@@ -125,3 +125,58 @@ test('fonte fora do ar na inicialização: fica DESCONECTADO e agenda nova tenta
   assert.strictEqual(e.dataState, 'desconectado');
   clearTimeout(e._retry); clearInterval(e._watch);
 });
+
+test('probabilidade: expiração não múltipla do gráfico → modelo indisponível (AGUARDAR)', async () => {
+  const { e } = await engineWithMock();
+  try {
+    await e.startPublic();
+    await e.setMarket(null, '15m');
+    e.setConfig({ expiryMin: 5 });
+    assert.strictEqual(e.model, null);
+    assert.match(e.prob.reason, /não é múltipla/);
+    e.setConfig({ expiryMin: 15 });
+    assert.ok(e.model && e.model.horizon === 1);
+  } finally { done(e); }
+});
+
+test('probabilidade: tendência forte gera CALL confirmado só no fechamento, com IC e contexto', async () => {
+  const { e } = await engineWithMock();
+  const notes = []; e.on('notify', n => notes.push(n));
+  try {
+    await e.startPublic();
+    e._histKey = 'x';                               // ignora o download em segundo plano do mock
+    let p = 100; const t0 = e.candles[0].epoch;
+    e.candles = Array.from({ length: 500 }, (_, i) => { const o = p; p += (i % 7 === 3 ? -0.4 : 1); return { epoch: t0 + i * 300, open: o, high: Math.max(o, p) + .1, low: Math.min(o, p) - .1, close: p }; });
+    e.hist = e.candles.slice(0, -1);
+    e.rebuildModel();
+    assert.ok(e.model.samples > 400);
+    e.lastTickAt = Date.now(); e.checkFreshness();
+    const last = e.candles.at(-1);
+    e.candles.push({ epoch: last.epoch + 300, open: last.close, high: last.close, low: last.close, close: last.close });
+    await e._onCandleClosed(e.candles.length - 2, e.candles.at(-1));
+    assert.ok(e.signal, 'sinal emitido');
+    assert.strictEqual(e.signal.direction, 'CALL');
+    assert.strictEqual(e.signal.stage, 'confirmado');
+    assert.ok(e.signal.confidence > 0.56 && e.signal.lo > 0.5);
+    assert.ok(e.signal.n >= 40 && e.signal.strategy === 'prob-estado-v1');
+    assert.ok(Math.abs(e.signal.pCall + e.signal.pPut - 1) < 1e-9);
+    assert.ok(notes.some(n => n.kind === 'sinal' && /CONFIRMADO CALL/.test(n.text)));
+  } finally { done(e); }
+});
+
+test('probabilidade ao vivo: dado atrasado mantém AGUARDAR mesmo com probabilidade alta', async () => {
+  const { e } = await engineWithMock();
+  try {
+    await e.startPublic();
+    e._histKey = 'x';
+    let p = 100; const t0 = e.candles[0].epoch;
+    e.candles = Array.from({ length: 500 }, (_, i) => { const o = p; p += (i % 7 === 3 ? -0.4 : 1); return { epoch: t0 + i * 300, open: o, high: Math.max(o, p) + .1, low: Math.min(o, p) - .1, close: p }; });
+    e.hist = e.candles.slice(0, -1); e.rebuildModel();
+    e.lastTickAt = Date.now() - 60000; e.checkFreshness();
+    e._liveProb(true);
+    assert.strictEqual(e.prob.stage, 'AGUARDAR');
+    assert.match(e.prob.reason, /desatualizado/);
+    e.lastTickAt = Date.now(); e.checkFreshness(); e._liveProb(true);
+    assert.strictEqual(e.prob.stage, 'preliminar');
+  } finally { done(e); }
+});
