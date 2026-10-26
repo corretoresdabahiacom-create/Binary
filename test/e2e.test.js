@@ -1,5 +1,6 @@
 'use strict';
 // Servidor web real + Deriv simulado, falando pelo mesmo WebSocket que o navegador usa.
+process.env.TRADING_ENABLED = '1'; // estes testes exercitam o caminho de ordens (desligado por padrão)
 const test = require('node:test');
 const assert = require('node:assert');
 const { spawn } = require('node:child_process');
@@ -45,6 +46,7 @@ test('servidor web: conectar, receber velas, comprar, origem estranha recusada',
     assert.strictEqual(got.state.account.type, 'demo');
     assert.strictEqual(got.state.accounts.length, 2);
 
+    await call('config', { expiryMin: 15 }); // independe do relógio
     const buy = await call('buy', { direction: 'CALL' });
     assert.strictEqual(buy.ok, true, buy.error);
     await wait(300);

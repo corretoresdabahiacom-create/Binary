@@ -1,11 +1,12 @@
 {
-  "name": "deriv-signal-desk",
-  "version": "1.0.0",
-  "description": "MVP: sinais e robô para Deriv com validação pela Claude",
+  "name": "trade-ai-core",
+  "version": "1.1.0",
+  "description": "Trade AI Core MVP: monitor de sinais (só análise) com dados oficiais da Deriv",
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",
-    "test": "node --test test/*.test.js"
+    "backtest": "node scripts/backtest.js",
+    "test": "node --test --test-force-exit test/*.test.js"
   },
   "dependencies": {
     "express": "^5.2.1",

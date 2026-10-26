@@ -30,8 +30,8 @@ function startMock() {
       if (m.ping) return reply({ msg_type: 'ping', ping: 'pong' });
       if (m.time) return reply({ msg_type: 'time', time: Math.floor(Date.now() / 1000) });
       if (m.ticks_history) {
-        const t0 = Math.floor(Date.now() / 1000 / 900) * 900 - 499 * 900; let p = 1000;
-        const candles = Array.from({ length: 500 }, (_, i) => { const o = p; p += Math.sin(i / 5) * 2; return { epoch: t0 + i * 900, open: o, high: Math.max(o, p) + 1, low: Math.min(o, p) - 1, close: p }; });
+        const g = m.granularity || 900, t0 = Math.floor(Date.now() / 1000 / g) * g - 499 * g; let p = 1000;
+        const candles = Array.from({ length: 500 }, (_, i) => { const o = p; p += Math.sin(i / 5) * 2; return { epoch: t0 + i * g, open: o, high: Math.max(o, p) + 1, low: Math.min(o, p) - 1, close: p }; });
         return reply({ msg_type: 'candles', candles, subscription: { id: 'sub-1' } });
       }
       if (m.forget) return reply({ msg_type: 'forget', forget: 1 });
