@@ -176,7 +176,7 @@ class Engine extends EventEmitter {
   async loadHistory() {
     const key = this.symbol + '|' + this.gran(); this._histKey = key;
     try {
-      const h = await catalogLib.fetchHistory(this.pub, this.symbol, this.gran(), 2);
+      const h = await catalogLib.fetchHistory(this.pub, this.symbol, this.gran(), 2, () => {}, 10000);
       if (this._histKey !== key) return;          // mercado mudou no meio do download
       const live = this.candles.slice(0, -1);
       const m = new Map(h.concat(live).map(c => [c.epoch, c]));

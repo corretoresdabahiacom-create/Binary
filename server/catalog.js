@@ -147,17 +147,18 @@ function matchRules(catalog, candles, series, i, { onlyValidated = true } = {}) 
 }
 
 // ---------- Histórico via API (paginado) ----------
-async function fetchHistory(sock, symbol, granularity, pages = 4, onProgress = () => {}) {
+// A Deriv limita cada resposta (~1.000 velas na API atual), então paginamos até `maxCandles`.
+async function fetchHistory(sock, symbol, granularity, pages = 4, onProgress = () => {}, maxCandles = pages * 5000) {
   let end = 'latest';
   let all = [];
-  for (let p = 0; p < pages; p++) {
+  for (let p = 0; p < pages * 10 && all.length < maxCandles; p++) {
     const res = await sock.send({ ticks_history: symbol, style: 'candles', granularity, count: 5000, end }, { timeoutMs: 30000 });
     const cs = (res.candles || []).map(c => ({ epoch: c.epoch, open: +c.open, high: +c.high, low: +c.low, close: +c.close }));
     if (!cs.length) break;
     all = cs.concat(all);
     onProgress({ page: p + 1, pages, candles: all.length });
+    if (end !== 'latest' && cs[0].epoch >= +end) break; // não avançou: fim do histórico
     end = String(cs[0].epoch - 1);
-    if (cs.length < 5000) break;
   }
   // remove duplicatas e ordena
   const m = new Map(all.map(c => [c.epoch, c]));

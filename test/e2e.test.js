@@ -46,6 +46,7 @@ test('servidor web: conectar, receber velas, comprar, origem estranha recusada',
     assert.strictEqual(got.state.account.type, 'demo');
     assert.strictEqual(got.state.accounts.length, 2);
 
+    await call('config', { expiryMin: 15 }); // independe do relógio
     const buy = await call('buy', { direction: 'CALL' });
     assert.strictEqual(buy.ok, true, buy.error);
     await wait(300);

@@ -22,7 +22,7 @@ test('motor: demo → compra real via proposal+buy, resultado, risco e diagnóst
   assert.ok(mock.state.wsUrls.some(u => u.includes('/ws/public')), 'usa WS público para velas');
   assert.strictEqual(e.candles.length, 500);
 
-  e.setConfig({ stake: 1, maxLoss: 2, maxConsecLosses: 2, maxTrades: 10 });
+  e.setConfig({ stake: 1, maxLoss: 2, maxConsecLosses: 2, maxTrades: 10, expiryMin: 15 }); // 15 min num gráfico de 5 min: nunca cai no último minuto da vela
   await e.placeTrade('CALL', 'manual');
   assert.strictEqual(mock.state.buys.length, 1);
   assert.strictEqual(e.open.direction, 'CALL');

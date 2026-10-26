@@ -67,3 +67,12 @@ test('padrão plantado é encontrado e validado fora da amostra', () => {
   assert.ok(hit, 'deveria achar a regra plantada (hora 10 após vela vermelha)');
   assert.ok(hit.testRate > 0.65);
 });
+
+test('histórico: pagina quando a Deriv devolve só 1.000 velas por pedido', async () => {
+  const { fetchHistory } = require('../server/catalog');
+  const sock = { send: async q => { const end = q.end === 'latest' ? 100000 : +q.end; const n = Math.min(1000, Math.floor(end / 60)); return { candles: Array.from({ length: n }, (_, i) => ({ epoch: end - (n - i) * 60, open: 1, high: 1, low: 1, close: 1 })) }; } };
+  const h = await fetchHistory(sock, 'R_100', 60, 2, () => {}, 10000);
+  assert.ok(h.length >= 1600 && h.length <= 1700, `tudo que existe (${h.length}), parando no fim do histórico`);
+  const h2 = await fetchHistory({ send: async q => { const end = q.end === 'latest' ? 1e9 : +q.end; return { candles: Array.from({ length: 1000 }, (_, i) => ({ epoch: end - (1000 - i) * 60, open: 1, high: 1, low: 1, close: 1 })) }; } }, 'R_100', 60, 2, () => {}, 10000);
+  assert.strictEqual(h2.length, 10000);
+});
