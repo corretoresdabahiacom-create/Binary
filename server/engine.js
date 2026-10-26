@@ -395,7 +395,7 @@ class Engine extends EventEmitter {
     this.prob = { ...e, stage: 'confirmado', reason: pass.reason, candle: newCandle.epoch, at: decidedAt };
     this._record(this.signal);
     this.emit('signal', this.signal); this.emit('prob', this.prob);
-    this.emit('notify', { kind: 'sinal', text: `CONFIRMADO ${e.direction === 'CALL' ? 'CALL ▲' : 'PUT ▼'} ${(e.p * 100).toFixed(1)}% · ${this.symbol} ${this.tf} · exp. ${this.cfg.expiryMin} min` });
+    this.emit('notify', { kind: 'sinal', text: `ENTRE AGORA ${e.direction === 'CALL' ? 'CALL ▲' : 'PUT ▼'} ${(e.p * 100).toFixed(1)}% · ${this.symbol} ${this.tf} · exp. ${this.cfg.expiryMin} min · janela ${Math.round(this.gran() * this.cfg.windowPct)} s` });
     this.push();
   }
 

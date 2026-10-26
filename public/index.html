@@ -45,6 +45,16 @@ select{width:auto} input:focus,select:focus{border-color:var(--accent)}
 .btn.stop{background:var(--real);color:#fff}
 .row{display:flex;gap:8px} .row>*{flex:1}
 label{display:block;font-size:12px;color:var(--mute);margin:10px 0 4px}
+.big{border-radius:14px;padding:18px 16px;text-align:center;color:#fff;margin-bottom:14px;border:3px solid transparent;transition:background .3s}
+.big .t{font-size:44px;font-weight:900;letter-spacing:1px;line-height:1.05}
+.big .p{font-size:22px;font-weight:800;margin-top:4px}
+.big .s{font-size:15px;font-weight:600;margin-top:8px;opacity:.95}
+.big .cd{font-size:30px;font-weight:900;margin-top:6px;font-variant-numeric:tabular-nums}
+.big.wait{background:#2a3140;color:#c9d1dd;border-color:#3a4456}
+.big.pre{background:#3b3420;color:#ffd666;border:3px dashed #ffd666}
+.big.call{background:#0f8a5f;border-color:#3ef0a8;animation:pulse 1s infinite}
+.big.put{background:#b3261e;border-color:#ff8a80;animation:pulse 1s infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(255,255,255,.55)}50%{box-shadow:0 0 0 12px rgba(255,255,255,0)}}
 .signal{min-height:112px;display:flex;flex-direction:column;justify-content:center}
 .signal .none{color:var(--mute);text-align:center}
 .signal .dir{font-size:22px;font-weight:700} .signal.call .dir{color:var(--up)} .signal.put .dir{color:var(--down)}
@@ -112,6 +122,7 @@ details summary{cursor:pointer;color:var(--mute);font-size:12px;text-transform:u
 
     <div>
       <div class="card">
+        <div class="big wait" id="big"><div class="t">AGUARDAR</div><div class="s">Carregando…</div></div>
         <div class="warnbox" id="modeBanner" style="margin-bottom:10px">MODO SÓ ANÁLISE — o app não envia ordens. Você decide e opera manualmente na corretora.</div>
         <h3>Probabilidade ao vivo</h3>
         <div id="prob" class="hint">Carregando histórico da Deriv para o modelo…</div>
@@ -324,7 +335,7 @@ const on = {
   candle(c) { ageBase = Date.now(); series.update({ time: c.epoch, open: c.open, high: c.high, low: c.low, close: c.close }); },
   prob(p) { renderProb(p); },
   notify(n) { notifyUser(n); loadSignals(); },
-  signal(s) { signal = s && s.status === 'valido' ? s : null; renderSignal(); drawMarkers(); if (s && s.status === 'valido') toast(`Sinal ${s.direction === 'CALL' ? 'de COMPRA' : 'de VENDA'}${s.confidence != null ? ' · ' + Math.round(s.confidence * 100) + '%' : ''}`, s.direction === 'CALL' ? 'ok' : 'warn'); },
+  signal(s) { signal = s && s.status === 'valido' ? s : null; renderBig(); renderSignal(); drawMarkers(); if (s && s.status === 'valido') toast(`Sinal ${s.direction === 'CALL' ? 'de COMPRA' : 'de VENDA'}${s.confidence != null ? ' · ' + Math.round(s.confidence * 100) + '%' : ''}`, s.direction === 'CALL' ? 'ok' : 'warn'); },
   trade_open(o) { open = o; renderOpen(); drawMarkers(); },
   trade_update(o) { open = o; renderOpen(); drawMarkers(); },
   trade_closed(t) { open = null; trades.push(t); renderOpen(); drawMarkers(); renderTrades(); toast(`${t.win ? 'Ganhou' : 'Perdeu'} ${fmt(t.profit)}`, t.win ? 'ok' : 'warn'); },
@@ -338,6 +349,7 @@ const on = {
 
 // ---------- Renderização ----------
 function renderProb(p) {
+  lastProb = p; renderBig();
   const el = $('#prob');
   if (!p || p.pCall == null) { el.innerHTML = `<b>AGUARDAR</b> — ${esc((p && p.reason) || 'sem estimativa')}`; return; }
   const c = Math.round(p.pCall * 1000) / 10, v = Math.round(p.pPut * 1000) / 10;
@@ -349,6 +361,30 @@ function renderProb(p) {
     <div>${p.n} casos semelhantes · nível: ${esc(p.level)} · IC95% ${(p.lo * 100).toFixed(1)}–${(p.hi * 100).toFixed(1)}%</div>
     ${p.stage === 'AGUARDAR' ? `<div>Motivo: ${esc(p.reason || '')}</div>` : ''}
     <div>Horizonte: ${p.horizon} vela(s) · estimativa estatística do histórico, não garantia.</div>`;
+}
+let lastProb = null;
+function renderBig() {
+  const el = $('#big'), t = now(), mmss = x => { x = Math.max(0, Math.round(x)); return Math.floor(x / 60) + ':' + String(x % 60).padStart(2, '0'); };
+  const pct = x => (x * 100).toFixed(1) + '%';
+  if (signal && signal.status === 'valido' && t < signal.expiresAt) {
+    const up = signal.direction === 'CALL';
+    el.className = 'big ' + (up ? 'call' : 'put');
+    el.innerHTML = `<div class="t">${up ? 'CALL ▲' : 'PUT ▼'}</div><div class="p">${pct(signal.confidence)} · ${signal.n} casos</div>
+      <div class="s">ENTRE AGORA — vela que abriu às ${hhmm(signal.candleOpen)} · expiração ${signal.expiryMin} min</div>
+      <div class="cd">${mmss(signal.expiresAt - t)}</div><div class="s">tempo restante para entrar</div>`;
+    return;
+  }
+  const p = lastProb, g = S ? ({ '5m': 300, '15m': 900, '1h': 3600 })[S.tf] : 300;
+  const close = p && p.candle ? p.candle + g : null;
+  if (p && p.stage === 'preliminar' && p.pCall != null) {
+    el.className = 'big pre';
+    el.innerHTML = `<div class="t">PREPARE ${p.direction === 'CALL' ? 'CALL ▲' : 'PUT ▼'}</div><div class="p">${pct(p.p)} (preliminar)</div>
+      <div class="s">NÃO ENTRE AINDA — confirma no fechamento da vela</div>${close ? `<div class="cd">${mmss(close - t)}</div><div class="s">para o fechamento</div>` : ''}`;
+    return;
+  }
+  el.className = 'big wait';
+  const why = !S ? 'conectando…' : S.dataState !== 'ok' ? 'dados ' + S.dataState : (p && p.reason) || 'sem vantagem estatística';
+  el.innerHTML = `<div class="t">AGUARDAR</div>${p && p.pCall != null ? `<div class="p">CALL ${pct(p.pCall)} · PUT ${pct(p.pPut)}</div>` : ''}<div class="s">${esc(why)}</div>`;
 }
 function now() { return Date.now() / 1000 + offset; }
 let ageBase = null, audio = null;
@@ -490,7 +526,7 @@ $('#cGo').onclick = async () => { $('#cGo').disabled = true; try { await call('c
 $('#cForget').onclick = () => call('forget').then(() => toast('Dados salvos removidos', 'ok')).catch(() => {});
 fetch('/api/trades').then(r => r.json()).then(t => { trades = t; renderTrades(); }).catch(() => {});
 
-setInterval(() => { renderSignal(); if (open) renderOpen(); if (signal && now() >= signal.expiresAt) drawMarkers(); if (ageBase != null) $('#dAge').textContent = ((Date.now() - ageBase) / 1000).toFixed(1) + ' s'; $('#clock').textContent = new Date(now() * 1000).toLocaleTimeString('pt-BR'); }, 1000);
+setInterval(() => { renderBig(); renderSignal(); if (open) renderOpen(); if (signal && now() >= signal.expiresAt) drawMarkers(); if (ageBase != null) $('#dAge').textContent = ((Date.now() - ageBase) / 1000).toFixed(1) + ' s'; $('#clock').textContent = new Date(now() * 1000).toLocaleTimeString('pt-BR'); }, 1000);
 connect();
 document.querySelectorAll('#exp button').forEach(b => b.onclick = () => call('config', { expiryMin: +b.dataset.e }).catch(() => {}));
 $('#minProb').onchange = () => call('config', { minProb: +$('#minProb').value / 100 }).catch(() => {});

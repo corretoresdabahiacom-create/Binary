@@ -160,7 +160,7 @@ test('probabilidade: tendência forte gera CALL confirmado só no fechamento, co
     assert.ok(e.signal.confidence > 0.56 && e.signal.lo > 0.5);
     assert.ok(e.signal.n >= 40 && e.signal.strategy === 'prob-estado-v1');
     assert.ok(Math.abs(e.signal.pCall + e.signal.pPut - 1) < 1e-9);
-    assert.ok(notes.some(n => n.kind === 'sinal' && /CONFIRMADO CALL/.test(n.text)));
+    assert.ok(notes.some(n => n.kind === 'sinal' && /ENTRE AGORA CALL/.test(n.text)));
   } finally { done(e); }
 });
 
