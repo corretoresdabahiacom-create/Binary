@@ -7,6 +7,7 @@ const { computeSeries, snapshot, localScore } = require('./indicators');
 const { askClaude } = require('./claude');
 const catalogLib = require('./catalog');
 const prob = require('./probability');
+const research = require('./research');
 
 const TRADES_FILE = path.join(process.env.DATA_DIR || path.join(__dirname, '..', 'data'), 'trades.json');
 const SIGNALS_FILE = path.join(process.env.DATA_DIR || path.join(__dirname, '..', 'data'), 'signals.json');
@@ -30,7 +31,7 @@ class Engine extends EventEmitter {
     this.serverOffset = 0;        // segundos (hora Deriv - hora local)
     this.mode = 'manual';         // manual | auto | catalog
     this.running = false;
-    this.cfg = { stake: 1, minConfidence: 0.7, maxLoss: 10, maxConsecLosses: 3, maxTrades: 20, windowPct: 0.1, expiryMin: 5, maxDataAgeSec: 20, minProb: 0.56, minSamples: 40 };
+    this.cfg = { stake: 1, minConfidence: 0.7, maxLoss: 10, maxConsecLosses: 3, maxTrades: 20, windowPct: 0.1, expiryMin: 5, maxDataAgeSec: 20, minProb: 0.56, minSamples: 40, edgeMargin: 0.02, allowUnapproved: 0 };
     this.hist = [];               // histórico longo de velas fechadas (Deriv)
     this.model = null;            // tabela de probabilidade
     this.prob = null;             // estimativa ao vivo
@@ -195,22 +196,19 @@ class Engine extends EventEmitter {
     const i = this.candles.length - 1, c = this.candles[i];
     const e = prob.estimate(this.model, this.candles, i, this.cfg.minSamples);
     if (!e) { this.prob = { stage: 'AGUARDAR', reason: 'indicadores insuficientes' }; return this.emit('prob', this.prob); }
-    const pass = this._passes(e);
-    this.prob = { ...e, stage: pass.ok ? 'preliminar' : 'AGUARDAR', reason: pass.reason, candle: c.epoch, at: nowMs };
+    const pass = this._passes(e, i);
+    this.prob = { ...e, direction: pass.direction || e.direction, p: pass.p ?? e.p, version: pass.version, approved: pass.approved, ev: pass.ev, stage: pass.ok ? 'preliminar' : 'AGUARDAR', reason: pass.reason, candle: c.epoch, at: nowMs };
     const elapsed = (this.now() - c.epoch) / this.gran();
     if (pass.ok && elapsed >= 0.5 && this._prelimFor !== c.epoch) {
       this._prelimFor = c.epoch;
-      this.emit('notify', { kind: 'preliminar', text: `Preliminar ${e.direction} ${(e.p * 100).toFixed(1)}% · ${this.symbol} · confirma no fechamento da vela` });
+      this.emit('notify', { kind: 'preliminar', text: `Preliminar ${pass.direction} ${(pass.p * 100).toFixed(1)}% · ${this.symbol} · confirma no fechamento da vela` });
     }
     this.emit('prob', this.prob);
   }
 
-  _passes(e) {
+  _passes(e, i) {
     if (this.dataState !== 'ok') return { ok: false, reason: 'dados ' + this.dataState };
-    if (e.n < this.cfg.minSamples) return { ok: false, reason: `amostra pequena (${e.n})` };
-    if (e.p < this.cfg.minProb) return { ok: false, reason: `probabilidade ${(e.p * 100).toFixed(1)}% < mínimo ${(this.cfg.minProb * 100).toFixed(0)}%` };
-    if (e.lo <= 0.5) return { ok: false, reason: `intervalo de confiança inclui 50% (${(e.lo * 100).toFixed(1)}–${(e.hi * 100).toFixed(1)}%)` };
-    return { ok: true, reason: `${e.n} casos semelhantes (${e.level}); IC95% ${(e.lo * 100).toFixed(1)}–${(e.hi * 100).toFixed(1)}%` };
+    return research.liveDecision(this.candles, i, e, { symbol: this.symbol, tf: this.tf, expiryMin: this.cfg.expiryMin }, this.cfg, true);
   }
 
   async _ensurePublic() {
@@ -376,26 +374,26 @@ class Engine extends EventEmitter {
   // Sinal confirmado: vela i acabou de fechar; entrada na abertura da vela seguinte.
   _probSignal(i, newCandle) {
     const e = prob.estimate(this.model, this.candles, i, this.cfg.minSamples);
-    const pass = e ? this._passes(e) : { ok: false, reason: this.model ? 'indicadores insuficientes' : (this.prob && this.prob.reason) || 'modelo indisponível' };
+    const pass = e ? this._passes(e, i) : { ok: false, reason: this.model ? 'indicadores insuficientes' : (this.prob && this.prob.reason) || 'modelo indisponível' };
     if (!e || !pass.ok) {
       this.prob = { ...(e || {}), stage: 'AGUARDAR', reason: pass.reason, candle: newCandle.epoch, at: Date.now() };
       this.emit('prob', this.prob); this.push(); return;
     }
     const decidedAt = Date.now();
     this.signal = {
-      uid: `${newCandle.epoch}-${this.symbol}-${this.tf}-${e.direction}`, status: 'valido', stage: 'confirmado',
+      uid: `${newCandle.epoch}-${this.symbol}-${this.tf}-${pass.direction}`, status: 'valido', stage: 'confirmado',
       symbol: this.symbol, tf: this.tf, expiryMin: this.cfg.expiryMin, strategy: e.model, source: SOURCE,
       createdAt: decidedAt, lastDataAt: this.lastTickAt, dataAgeMs: decidedAt - this.lastTickAt,
-      id: ++this.signalSeq, direction: e.direction, kind: 'probabilidade',
-      confidence: e.p, pCall: e.pCall, pPut: e.pPut, lo: e.lo, hi: e.hi, n: e.n, level: e.level, state: e.state,
+      id: ++this.signalSeq, direction: pass.direction, kind: 'probabilidade',
+      confidence: pass.p, ev: pass.ev, version: pass.version, pCall: e.pCall, pPut: e.pPut, lo: e.lo, hi: e.hi, n: e.n, level: e.level, state: e.state,
       reason: pass.reason, ai: false, rule: null,
       candleOpen: newCandle.epoch, expiresAt: newCandle.epoch + Math.round(this.gran() * this.cfg.windowPct),
       price: newCandle.open, basePrice: this.candles[i].close,
     };
-    this.prob = { ...e, stage: 'confirmado', reason: pass.reason, candle: newCandle.epoch, at: decidedAt };
+    this.prob = { ...e, direction: pass.direction, p: pass.p, version: pass.version, approved: pass.approved, ev: pass.ev, stage: 'confirmado', reason: pass.reason, candle: newCandle.epoch, at: decidedAt };
     this._record(this.signal);
     this.emit('signal', this.signal); this.emit('prob', this.prob);
-    this.emit('notify', { kind: 'sinal', text: `ENTRE AGORA ${e.direction === 'CALL' ? 'CALL ▲' : 'PUT ▼'} ${(e.p * 100).toFixed(1)}% · ${this.symbol} ${this.tf} · exp. ${this.cfg.expiryMin} min · janela ${Math.round(this.gran() * this.cfg.windowPct)} s` });
+    this.emit('notify', { kind: 'sinal', text: `ENTRE AGORA ${pass.direction === 'CALL' ? 'CALL ▲' : 'PUT ▼'} ${(pass.p * 100).toFixed(1)}% · ${this.symbol} ${this.tf} · exp. ${this.cfg.expiryMin} min · janela ${Math.round(this.gran() * this.cfg.windowPct)} s` });
     this.push();
   }
 
@@ -526,6 +524,8 @@ class Engine extends EventEmitter {
     if (c.maxDataAgeSec != null && !(Number(c.maxDataAgeSec) >= 3 && Number(c.maxDataAgeSec) <= 300)) throw new Error('idade máxima do dado entre 3 e 300 s');
     if (c.minProb != null && !(Number(c.minProb) >= 0.5 && Number(c.minProb) <= 0.95)) throw new Error('probabilidade mínima entre 50% e 95%');
     if (c.minSamples != null && !(Number(c.minSamples) >= 10)) throw new Error('amostra mínima ≥ 10');
+    if (c.edgeMargin != null && !(Number(c.edgeMargin) >= 0 && Number(c.edgeMargin) <= 0.2)) throw new Error('margem entre 0 e 20 p.p.');
+    if (c.allowUnapproved != null) c.allowUnapproved = c.allowUnapproved ? 1 : 0;
     const oldExp = this.cfg.expiryMin;
     for (const k of Object.keys(this.cfg)) if (c[k] != null && !Number.isNaN(Number(c[k]))) this.cfg[k] = Number(c[k]);
     if (this.cfg.expiryMin !== oldExp && this.candles.length) {

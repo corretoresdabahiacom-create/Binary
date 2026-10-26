@@ -7,6 +7,8 @@ const { WebSocketServer } = require('ws');
 const { Engine } = require('./engine');
 const { createGuard } = require('./access');
 const { Scanner, NAMES } = require('./scanner');
+const research = require('./research');
+const { spawn } = require('child_process');
 
 const PORT = Number(process.env.PORT || 3010); // 3000 costuma estar ocupada (ex.: Tailscale)
 const HOST = '127.0.0.1'; // nunca exponha: o servidor guarda tokens de negociação
@@ -29,6 +31,12 @@ app.use(express.static(path.join(__dirname, '..', 'public')));
 app.get('/api/trades', (req, res) => res.json(engine.trades.slice(-200)));
 app.get('/api/signals', (req, res) => res.json({ stats: engine.signalStats(), signals: engine.signals.slice(-200) }));
 app.get('/api/probability', (req, res) => res.json({ prob: engine.prob, model: engine.publicState().model, cfg: { minProb: engine.cfg.minProb, minSamples: engine.cfg.minSamples, expiryMin: engine.cfg.expiryMin, tf: engine.tf } }));
+app.get('/api/research', (req, res) => {
+  const r = research.loadResearch();
+  if (!r) return res.json(null);
+  res.json({ generatedAt: r.generatedAt, method: r.method, aggregate: r.aggregate, running: !!researchJob,
+    combos: Object.fromEntries(Object.entries(r.combos).map(([k, c]) => [k, { approved: c.approved, payout: c.payout, payoutSource: c.payoutSource, v1: c.v1, v2: c.v2, calibration: c.calibration, v1PorSessao: c.v1PorSessao, metaPesos: c.meta && Object.fromEntries(research.FEATURE_NAMES.map((n, j) => [n, +c.meta.w[j].toFixed(3)])) }])) });
+});
 app.get('/api/scan', (req, res) => res.json(scanner ? scanner.view() : []));
 app.get('/api/status', (req, res) => res.json(engine.publicState()));
 const server = http.createServer(app);
@@ -67,7 +75,17 @@ async function connectWith(cfg) {
   await engine.connect(cfg.token, cfg.appId);
 }
 
+let researchJob = null;
 const handlers = {
+  // Backtest v2 em processo separado: o monitor continua rodando enquanto calcula.
+  async research_run() {
+    if (researchJob) throw new Error('backtest v2 já está rodando');
+    researchJob = spawn(process.execPath, [path.join(__dirname, '..', 'scripts', 'backtest2.js')], { env: process.env });
+    engine.log('Backtest v2 iniciado (alguns minutos; o monitor continua ativo)', 'ok');
+    researchJob.stdout.on('data', d => String(d).split('\n').filter(Boolean).forEach(l => engine.log('v2: ' + l)));
+    researchJob.stderr.on('data', d => engine.log('v2: ' + String(d).trim(), 'error'));
+    researchJob.on('close', code => { researchJob = null; engine.log(code === 0 ? 'Backtest v2 concluído — artefatos aplicados' : 'Backtest v2 falhou', code === 0 ? 'ok' : 'error'); bcast('research', null); engine.push(); });
+  },
   async connect(d) {
     if (!d.token || !d.appId) throw new Error('informe o App ID e o token da Deriv');
     await connectWith(d);

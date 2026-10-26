@@ -163,6 +163,14 @@ details summary{cursor:pointer;color:var(--mute);font-size:12px;text-transform:u
       </div>
 
       <div class="card" style="margin-top:14px">
+        <h3>Qualidade — backtest v2</h3>
+        <div id="rsSum" class="hint">Sem backtest v2 ainda: valendo a regra v1.</div>
+        <button class="btn primary" id="rsRun" style="margin-top:10px">Rodar backtest v2 (dados reais)</button>
+        <label>Margem mínima sobre o empate (p.p.)</label><input type="number" id="edgeMargin" min="0" max="20" step="0.5" value="2">
+        <label style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="checkbox" id="allowUn" style="width:auto"> Avisar também combinações NÃO aprovadas (mais operações, sem vantagem comprovada)</label>
+      </div>
+
+      <div class="card" style="margin-top:14px">
         <h3>Sinais registrados</h3>
         <div class="stat"><span>Avaliados · favoráveis</span><b id="sigStat">—</b></div>
         <p class="hint">Resultado = fechamento da vela de expiração vs. preço de abertura do sinal. Histórico não garante resultado futuro.</p>
@@ -328,6 +336,8 @@ const on = {
     document.querySelectorAll('.trading-only, #acct, [data-v="conn"], [data-v="history"]').forEach(e => e.style.display = s.tradingEnabled ? '' : 'none');
     $('#modeBanner').style.display = s.tradingEnabled ? 'none' : '';
     document.querySelectorAll('#exp button').forEach(b => b.classList.toggle('on', +b.dataset.e === s.cfg.expiryMin));
+    if (document.activeElement !== $('#edgeMargin')) $('#edgeMargin').value = (s.cfg.edgeMargin * 100).toFixed(1);
+    $('#allowUn').checked = !!s.cfg.allowUnapproved;
     if (document.activeElement !== $('#maxAge')) $('#maxAge').value = s.cfg.maxDataAgeSec;
     $('#dSrc').textContent = s.source; $('#dMkt').textContent = s.symbol + ' · ' + s.market + ' · ' + s.tf;
     const lbl = { ok: '● OK', desatualizado: '▲ DESATUALIZADO', desconectado: '✕ DESCONECTADO' };
@@ -346,6 +356,7 @@ const on = {
   prob(p) { renderProb(p); },
   opportunity(o) { onOpportunity(o); loadSignals(); },
   scan(l) { renderScan(l); },
+  research() { loadResearch(); },
   notify(n) { notifyUser(n); loadSignals(); },
   signal(s) { signal = s && s.status === 'valido' ? s : null; renderBig(); renderSignal(); drawMarkers(); if (s && s.status === 'valido') toast(`Sinal ${s.direction === 'CALL' ? 'de COMPRA' : 'de VENDA'}${s.confidence != null ? ' · ' + Math.round(s.confidence * 100) + '%' : ''}`, s.direction === 'CALL' ? 'ok' : 'warn'); },
   trade_open(o) { open = o; renderOpen(); drawMarkers(); },
@@ -370,6 +381,7 @@ function renderProb(p) {
       <div style="width:${c}%;background:#26a69a;display:flex;align-items:center;padding-left:6px">CALL ${c}%</div>
       <div style="width:${v}%;background:#ef5350;display:flex;align-items:center;justify-content:flex-end;padding-right:6px">PUT ${v}%</div></div>
     <div style="margin-top:6px"><b>${tag}</b></div>
+    <div>${p.version === 'v2' ? `Regra v2 · prob. final <b>${(p.p * 100).toFixed(1)}%</b> ${p.direction} · VE ${p.ev != null ? (p.ev * 100).toFixed(1) + '%' : '—'} · ${p.approved ? '<b>APROVADA</b>' : 'não aprovada'}` : 'Regra v1 (rode o backtest v2)'}</div>
     <div>${p.n} casos semelhantes · nível: ${esc(p.level)} · IC95% ${(p.lo * 100).toFixed(1)}–${(p.hi * 100).toFixed(1)}%</div>
     ${p.stage === 'AGUARDAR' ? `<div>Motivo: ${esc(p.reason || '')}</div>` : ''}
     <div>Horizonte: ${p.horizon} vela(s) · estimativa estatística do histórico, não garantia.</div>`;
@@ -420,9 +432,20 @@ function renderScan(list) {
   $('#scanSum').textContent = `${list.length} combinações monitoradas · ${ready} com modelo pronto · ${fresh} com dados frescos (forex fecha no fim de semana)`;
   const ok = list.filter(x => x.ok).sort((a, b) => b.p - a.p);
   $('#scanList').innerHTML = ok.length ? ok.map((x, i) => `<div class="opp ${x.direction === 'CALL' ? 'call' : 'put'} ${x.stage === 'confirmado' ? 'conf' : ''}">
-      <b>${x.direction === 'CALL' ? 'CALL ▲' : 'PUT ▼'}</b><span><b>${esc(x.name)}</b> · ${TFL[x.tf]} · exp. ${x.expiryMin} min<br><span class="hint">${(x.p * 100).toFixed(1)}% · ${x.n} casos · ${x.stage}</span></span>
+      <b>${x.direction === 'CALL' ? 'CALL ▲' : 'PUT ▼'}</b><span><b>${esc(x.name)}</b> · ${TFL[x.tf]} · exp. ${x.expiryMin} min<br><span class="hint">${(x.p * 100).toFixed(1)}% · ${x.n} casos · ${x.stage} · ${x.version === 'v2' ? (x.approved ? 'APROVADA' : 'NÃO aprovada') : 'v1'}</span></span>
       <button class="btn primary go" data-i="${i}">Ir</button></div>`).join('') : '<div class="hint" style="margin-top:6px">Nenhum mercado com probabilidade suficiente agora — AGUARDAR.</div>';
   $('#scanList').querySelectorAll('.go').forEach(b => b.onclick = () => gotoOpp(ok[+b.dataset.i]));
+}
+async function loadResearch() {
+  try {
+    const r = await (await fetch('/api/research')).json(); if (!r) return;
+    const pct = x => x == null ? '—' : (x * 100).toFixed(1) + '%';
+    const ok = Object.entries(r.combos).filter(([, c]) => c.approved).map(([k]) => k.replace(/\|/g, ' · ').replace(/ · (\d+)$/, ' · exp $1'));
+    const a = r.aggregate;
+    $('#rsSum').innerHTML = `Gerado em ${new Date(r.generatedAt).toLocaleString('pt-BR')} · ${Object.keys(r.combos).length} combinações<br>
+      Fora da amostra, operações independentes: <b>v1 ${a.v1.n} op · ${pct(a.v1.rate)}</b> | <b>v2 ${a.v2.n} op · ${pct(a.v2.rate)}</b><br>
+      Aprovadas (FDR 10%, VE&gt;0, ≥30 op): <b>${ok.length ? ok.map(esc).join(', ') : 'nenhuma'}</b>${r.running ? '<br>Rodando novamente…' : ''}`;
+  } catch {}
 }
 function now() { return Date.now() / 1000 + offset; }
 let ageBase = null, audio = null;
@@ -572,7 +595,10 @@ $('#minSamples').onchange = () => call('config', { minSamples: +$('#minSamples')
 $('#maxAge').onchange = () => call('config', { maxDataAgeSec: +$('#maxAge').value }).catch(() => {});
 $('#nOn').onchange = () => { if ($('#nOn').checked && 'Notification' in window && Notification.permission === 'default') Notification.requestPermission(); };
 document.addEventListener('click', () => { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission(); }, { once: true });
-loadSignals(); setInterval(loadSignals, 30000);
+loadSignals(); setInterval(loadSignals, 30000); loadResearch(); setInterval(loadResearch, 60000);
+$('#rsRun').onclick = () => call('research_run').then(() => toast('Backtest v2 iniciado — leva alguns minutos', 'ok')).catch(() => {});
+$('#edgeMargin').onchange = () => call('config', { edgeMargin: +$('#edgeMargin').value / 100 }).catch(() => {});
+$('#allowUn').onchange = () => call('config', { allowUnapproved: $('#allowUn').checked ? 1 : 0 }).catch(() => {});
 </script>
 </body>
 </html>

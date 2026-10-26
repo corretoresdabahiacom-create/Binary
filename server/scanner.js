@@ -6,6 +6,7 @@ const EventEmitter = require('events');
 const deriv = require('./deriv');
 const { fetchHistory } = require('./catalog');
 const prob = require('./probability');
+const research = require('./research');
 
 const DEFAULT_SYMBOLS = ['R_10', 'R_25', 'R_50', 'R_75', 'R_100', 'frxEURUSD', 'frxGBPUSD', 'frxUSDJPY', 'frxAUDUSD', 'frxEURGBP'];
 const NAMES = { R_10: 'Volatility 10', R_25: 'Volatility 25', R_50: 'Volatility 50', R_75: 'Volatility 75', R_100: 'Volatility 100',
@@ -85,13 +86,8 @@ class Scanner extends EventEmitter {
     this._confirm(st, c);
   }
 
-  _passes(e, st) {
-    const cfg = this.getCfg();
-    if (!this.fresh(st)) return { ok: false, reason: 'dados atrasados' };
-    if (e.n < cfg.minSamples) return { ok: false, reason: `amostra pequena (${e.n})` };
-    if (e.p < cfg.minProb) return { ok: false, reason: `${(e.p * 100).toFixed(1)}% < ${(cfg.minProb * 100).toFixed(0)}%` };
-    if (e.lo <= 0.5) return { ok: false, reason: 'IC95% inclui 50%' };
-    return { ok: true, reason: `${e.n} casos (${e.level}); IC95% ${(e.lo * 100).toFixed(1)}–${(e.hi * 100).toFixed(1)}%` };
+  _passes(e, st, i, exp) {
+    return research.liveDecision(st.candles, i, e, { symbol: st.sym, tf: st.tf, expiryMin: +exp }, this.getCfg(), this.fresh(st));
   }
 
   // Vela em formação: estimativa preliminar, no máx. 1x/s por stream.
@@ -102,14 +98,14 @@ class Scanner extends EventEmitter {
     const cfg = this.getCfg(), i = st.candles.length - 1, c = st.candles[i];
     for (const [exp, m] of Object.entries(st.models)) {
       const e = prob.estimate(m, st.candles, i, cfg.minSamples);
-      const pass = e ? this._passes(e, st) : { ok: false, reason: 'indicadores insuficientes' };
-      st.last[exp] = e ? { pCall: e.pCall, p: e.p, direction: e.direction, n: e.n, ok: pass.ok, reason: pass.reason, stage: pass.ok ? 'preliminar' : 'AGUARDAR' } : { ok: false, reason: pass.reason, stage: 'AGUARDAR' };
+      const pass = e ? this._passes(e, st, i, exp) : { ok: false, reason: 'indicadores insuficientes' };
+      st.last[exp] = e ? { pCall: e.pCall, p: pass.p ?? e.p, direction: pass.direction || e.direction, approved: pass.approved, version: pass.version, n: e.n, ok: pass.ok, reason: pass.reason, stage: pass.ok ? 'preliminar' : 'AGUARDAR' } : { ok: false, reason: pass.reason, stage: 'AGUARDAR' };
       const elapsed = (this.now() - c.epoch) / st.gran;
       const key = `${c.epoch}|${exp}`;
       if (pass.ok && elapsed >= 0.5 && st.notified[exp] !== key && !this.isActive(st.sym, st.tf, +exp)) {
         st.notified[exp] = key;
         this.emit('opportunity', { stage: 'preliminar', symbol: st.sym, name: this.name(st.sym), tf: st.tf, expiryMin: +exp,
-          direction: e.direction, p: e.p, n: e.n, lo: e.lo, hi: e.hi, closeAt: c.epoch + st.gran, reason: pass.reason });
+          direction: pass.direction, p: pass.p, ev: pass.ev, approved: pass.approved, n: e.n, lo: e.lo, hi: e.hi, closeAt: c.epoch + st.gran, reason: pass.reason });
       }
     }
   }
@@ -121,17 +117,17 @@ class Scanner extends EventEmitter {
     for (const [exp, m] of Object.entries(st.models)) {
       const e = prob.estimate(m, st.candles, i, cfg.minSamples);
       if (!e) continue;
-      const pass = this._passes(e, st);
-      st.last[exp] = { pCall: e.pCall, p: e.p, direction: e.direction, n: e.n, ok: pass.ok, reason: pass.reason, stage: pass.ok ? 'confirmado' : 'AGUARDAR' };
+      const pass = this._passes(e, st, i, exp);
+      st.last[exp] = { pCall: e.pCall, p: pass.p ?? e.p, direction: pass.direction || e.direction, approved: pass.approved, version: pass.version, n: e.n, ok: pass.ok, reason: pass.reason, stage: pass.ok ? 'confirmado' : 'AGUARDAR' };
       if (!pass.ok || this.isActive(st.sym, st.tf, +exp)) continue; // combinação aberta no painel: o painel confirma e registra
-      const sig = { uid: `${newCandle.epoch}-${st.sym}-${st.tf}-${e.direction}-x${exp}`, status: 'valido', stage: 'confirmado', origin: 'scanner',
+      const sig = { uid: `${newCandle.epoch}-${st.sym}-${st.tf}-${pass.direction}-x${exp}`, status: 'valido', stage: 'confirmado', origin: 'scanner',
         symbol: st.sym, tf: st.tf, expiryMin: +exp, strategy: e.model, source: 'Deriv API oficial (scanner)', createdAt: Date.now(),
-        direction: e.direction, confidence: e.p, pCall: e.pCall, pPut: e.pPut, lo: e.lo, hi: e.hi, n: e.n, level: e.level,
+        direction: pass.direction, confidence: pass.p, ev: pass.ev, version: pass.version, pCall: e.pCall, pPut: e.pPut, lo: e.lo, hi: e.hi, n: e.n, level: e.level,
         reason: pass.reason, candleOpen: newCandle.epoch, expiresAt: newCandle.epoch + Math.round(st.gran * cfg.windowPct), price: newCandle.open };
       this.pending.push(sig); this.record(sig);
       if (!this.isActive(st.sym, st.tf, +exp))
         this.emit('opportunity', { stage: 'confirmado', symbol: st.sym, name: this.name(st.sym), tf: st.tf, expiryMin: +exp,
-          direction: e.direction, p: e.p, n: e.n, lo: e.lo, hi: e.hi, entryUntil: sig.expiresAt, candleOpen: newCandle.epoch, reason: pass.reason });
+          direction: pass.direction, p: pass.p, ev: pass.ev, approved: pass.approved, n: e.n, lo: e.lo, hi: e.hi, entryUntil: sig.expiresAt, candleOpen: newCandle.epoch, reason: pass.reason });
     }
   }
 
@@ -155,7 +151,7 @@ class Scanner extends EventEmitter {
       const hz = exp * 60 / st.gran; if (!Number.isInteger(hz) || hz < 1) continue;
       const l = st.last[exp] || {};
       out.push({ symbol: st.sym, name: this.name(st.sym), tf: st.tf, expiryMin: exp, loaded: st.loaded, fresh: !!this.fresh(st, nowMs),
-        error: st.error || null, pCall: l.pCall ?? null, p: l.p ?? null, direction: l.direction || null, n: l.n ?? null, ok: !!l.ok, stage: l.stage || (st.loaded ? 'AGUARDAR' : 'carregando'), reason: l.reason || null });
+        error: st.error || null, pCall: l.pCall ?? null, p: l.p ?? null, direction: l.direction || null, n: l.n ?? null, approved: l.approved ?? null, version: l.version || null, ok: !!l.ok, stage: l.stage || (st.loaded ? 'AGUARDAR' : 'carregando'), reason: l.reason || null });
     }
     return out;
   }

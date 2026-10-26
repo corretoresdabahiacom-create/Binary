@@ -16,6 +16,13 @@ Monitor de mercado para **decisão manual**: o app mostra o gráfico, emite CALL
   - Sinal só sai com: probabilidade ≥ mínimo (padrão 56%), ≥ 40 casos, IC95% inteiro acima de 50% e dados frescos. Caso contrário: **AGUARDAR** com o motivo.
   - Expiração precisa ser múltipla do gráfico (ex.: gráfico 15 min + expiração 5 min = indisponível).
   - Em índices sintéticos (gerador aleatório) o esperado é quase sempre AGUARDAR — isso é o modelo funcionando, não defeito.
+- **Backtest v2 / regra v2 (botão "Rodar backtest v2" ou `npm run backtest2`):** com dados reais da Deriv, por ativo × gráfico × expiração:
+  - walk-forward com embargo; operações **sem sobreposição** (faixa de confiança honesta);
+  - **calibração isotônica** da probabilidade (quando o modelo diz 58%, deve acertar ~58%);
+  - **meta-modelo** (regressão logística) com features de **sessão do câmbio** (Ásia/Londres/sobreposição/NY), percentil de volatilidade, RSI, Bollinger, MACD e impulso — escolhe entre CALL e PUT e filtra sinais fracos; uma 2ª calibração fora da amostra anula o meta-modelo se ele não provar valor;
+  - **payout real** da Deriv (quando a API pública fornece; senão 95%, marcado) e decisão por **valor esperado** (prob. final ≥ empate + margem);
+  - **Benjamini-Hochberg (FDR 10%)** entre as combinações: só as **aprovadas** (significativas, VE>0, ≥30 operações independentes) notificam. Opção para avisar também as não aprovadas.
+  - Resultado salvo em `data/research.json`; painel e scanner usam automaticamente as mesmas funções (`server/research.js`).
 - **Ciclo do sinal:** válido → expirado (janela de entrada acabou) ou invalidado (com motivo). Tudo gravado em `data/signals.json` com ativo, timeframe, expiração, estratégia, horário e idade do dado.
 - **Resultado observado:** após a vela de expiração fechar, compara fechamento vs. preço de abertura do sinal (favorável / desfavorável / empate). Nunca usa dados futuros.
 - **Alertas no Windows** (notificação do navegador + som) para sinal, invalidação, dados atrasados e retomada. Permita notificações quando o navegador pedir.
@@ -28,7 +35,7 @@ Monitor de mercado para **decisão manual**: o app mostra o gráfico, emite CALL
 - **Celular:** sem push. Acesso remoto só via túnel (ver seção Cloudflare abaixo); o monitor depende do PC ligado.
 - Sinais vêm de regras de indicadores (`indicadores-v1`) sem vantagem comprovada. Nada aqui é promessa de lucro ou taxa de acerto.
 
-**Testes:** `npm test` (25 testes; usam um servidor Deriv **simulado** — validam a lógica, não a integração real).
+**Testes:** `npm test` (36 testes; usam um servidor Deriv **simulado** — validam a lógica, não a integração real).
 
 ---
 
