@@ -21,6 +21,8 @@ if (guard) app.use(guard.middleware); // tudo exige login do Cloudflare Access
 app.use('/vendor', express.static(path.join(__dirname, '..', 'node_modules', 'lightweight-charts', 'dist')));
 app.use(express.static(path.join(__dirname, '..', 'public')));
 app.get('/api/trades', (req, res) => res.json(engine.trades.slice(-200)));
+app.get('/api/signals', (req, res) => res.json({ stats: engine.signalStats(), signals: engine.signals.slice(-200) }));
+app.get('/api/status', (req, res) => res.json(engine.publicState()));
 const server = http.createServer(app);
 
 const allowedOrigins = new Set([`http://localhost:${PORT}`, `http://127.0.0.1:${PORT}`,
@@ -37,7 +39,7 @@ const wss = new WebSocketServer({
 const clients = new Set();
 const bcast = (type, data) => { const s = JSON.stringify({ type, data }); for (const c of clients) if (c.readyState === 1) c.send(s); };
 
-for (const ev of ['state', 'candles', 'candle', 'signal', 'trade_open', 'trade_update', 'trade_closed', 'log', 'alert', 'catalog_progress', 'catalog'])
+for (const ev of ['state', 'candles', 'candle', 'signal', 'trade_open', 'trade_update', 'trade_closed', 'log', 'alert', 'catalog_progress', 'catalog', 'notify'])
   engine.on(ev, d => bcast(ev, d));
 engine.on('trade_closed', () => bcast('diagnostics', engine.diagnostics()));
 
@@ -107,6 +109,7 @@ wss.on('connection', ws => {
 
 server.listen(PORT, HOST, async () => {
   console.log(`Deriv MVP em http://localhost:${PORT}`);
+  try { await engine.startPublic(); console.log('Fonte de dados: Deriv (pública) conectada'); } catch (e) { console.log('Fonte de dados indisponível:', e.message); }
   const saved = loadConfig();
   if (saved && saved.token && saved.appId) {
     try { await connectWith(saved); console.log('Reconectado com credenciais salvas'); }

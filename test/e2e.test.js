@@ -1,5 +1,6 @@
 'use strict';
 // Servidor web real + Deriv simulado, falando pelo mesmo WebSocket que o navegador usa.
+process.env.TRADING_ENABLED = '1'; // estes testes exercitam o caminho de ordens (desligado por padrão)
 const test = require('node:test');
 const assert = require('node:assert');
 const { spawn } = require('node:child_process');

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Deriv Signal Desk</title>
+<title>Trade AI Core</title>
 <style>
 :root{
   --bg:#0e1116; --panel:#151a22; --panel2:#1b212b; --line:#252d3a; --text:#e6e9ef; --mute:#8a94a6;
@@ -73,9 +73,9 @@ details summary{cursor:pointer;color:var(--mute);font-size:12px;text-transform:u
 </head>
 <body>
 <header>
-  <div class="brand">Deriv <span>Signal Desk</span></div>
+  <div class="brand">Trade AI <span>Core</span></div>
   <nav id="nav">
-    <button data-v="trade" class="on">Operar</button>
+    <button data-v="trade" class="on">Painel</button>
     <button data-v="catalog">Catálogo</button>
     <button data-v="history">Histórico</button>
     <button data-v="conn">Conexão</button>
@@ -97,7 +97,7 @@ details summary{cursor:pointer;color:var(--mute);font-size:12px;text-transform:u
             <option value="R_50">Volatility 50</option><option value="R_25">Volatility 25</option><option value="R_10">Volatility 10</option>
             <option value="frxEURUSD">EUR/USD</option><option value="frxGBPUSD">GBP/USD</option><option value="frxUSDJPY">USD/JPY</option>
           </select>
-          <div class="seg" id="tf"><button data-tf="15m" class="on">15 min</button><button data-tf="1h">1 hora</button></div>
+          <div class="seg" id="tf"><button data-tf="5m" class="on">5 min</button><button data-tf="15m">15 min</button><button data-tf="1h">1 hora</button></div>
           <span class="sp"></span>
           <span class="tag" id="clock">—</span>
         </div>
@@ -112,11 +112,35 @@ details summary{cursor:pointer;color:var(--mute);font-size:12px;text-transform:u
 
     <div>
       <div class="card">
+        <div class="warnbox" id="modeBanner" style="margin-bottom:10px">MODO SÓ ANÁLISE — o app não envia ordens. Você decide e opera manualmente na corretora.</div>
         <h3>Sinal para a próxima vela</h3>
+        <label>Expiração pretendida (independente do timeframe)</label>
+        <div class="seg" id="exp" style="width:100%"><button data-e="5" class="on" style="flex:1">5 min</button><button data-e="15" style="flex:1">15 min</button></div>
         <div class="signal" id="signal"><div class="none">Aguardando confluência de padrões e indicadores…</div></div>
       </div>
 
       <div class="card" style="margin-top:14px">
+        <h3>Diagnóstico da fonte</h3>
+        <div class="stat"><span>Fonte</span><b id="dSrc">—</b></div>
+        <div class="stat"><span>Mercado</span><b id="dMkt">—</b></div>
+        <div class="stat"><span>Estado dos dados</span><b id="dState">—</b></div>
+        <div class="stat"><span>Idade do último dado</span><b id="dAge">—</b></div>
+        <div class="stat"><span>Último preço</span><b id="dPrice">—</b></div>
+        <div class="stat"><span>Sincronização com o gráfico da corretora</span><b>Não validada</b></div>
+        <p class="hint" id="dBlock"></p>
+        <p class="hint">Não há acesso programático ao OHLC exibido pela corretora; compare visualmente. Sinais só são emitidos com dados frescos da Deriv.</p>
+        <label>Limite de idade do dado (s)</label><input type="number" id="maxAge" min="3" max="300" step="1" value="20">
+        <label style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="checkbox" id="nOn" checked style="width:auto"> Alertas do Windows + som</label>
+      </div>
+
+      <div class="card" style="margin-top:14px">
+        <h3>Sinais registrados</h3>
+        <div class="stat"><span>Avaliados · favoráveis</span><b id="sigStat">—</b></div>
+        <p class="hint">Resultado = fechamento da vela de expiração vs. preço de abertura do sinal. Histórico não garante resultado futuro.</p>
+        <div id="sigList" class="log" style="max-height:180px"></div>
+      </div>
+
+      <div class="card trading-only" style="margin-top:14px">
         <h3>Entrada</h3>
         <label>Valor por operação</label>
         <input type="number" id="stake" min="0.35" step="0.5" value="1">
@@ -127,7 +151,7 @@ details summary{cursor:pointer;color:var(--mute);font-size:12px;text-transform:u
         <p class="hint">A operação encerra no fechamento da vela atual. Você pode sair antes.</p>
       </div>
 
-      <div class="card" style="margin-top:14px">
+      <div class="card trading-only" style="margin-top:14px">
         <h3>Robô</h3>
         <div class="seg" id="botMode" style="width:100%"><button data-m="auto" class="on" style="flex:1">Automático</button><button data-m="catalog" style="flex:1">Por catálogo</button></div>
         <label>Probabilidade mínima para entrar (%)</label>
@@ -272,11 +296,22 @@ const on = {
     $('#buyUp').disabled = $('#buyDown').disabled = !s.connected || !!s.open;
     if (s.open) { open = s.open; } else if (open && !s.open) { open = null; }
     renderOpen(); renderSignal(); renderCatalogSub();
-    if (!s.connected) switchView('conn');
+    document.querySelectorAll('.trading-only, #acct, [data-v="conn"], [data-v="history"]').forEach(e => e.style.display = s.tradingEnabled ? '' : 'none');
+    $('#modeBanner').style.display = s.tradingEnabled ? 'none' : '';
+    document.querySelectorAll('#exp button').forEach(b => b.classList.toggle('on', +b.dataset.e === s.cfg.expiryMin));
+    if (document.activeElement !== $('#maxAge')) $('#maxAge').value = s.cfg.maxDataAgeSec;
+    $('#dSrc').textContent = s.source; $('#dMkt').textContent = s.symbol + ' · ' + s.market + ' · ' + s.tf;
+    const lbl = { ok: '● OK', desatualizado: '▲ DESATUALIZADO', desconectado: '✕ DESCONECTADO' };
+    $('#dState').textContent = lbl[s.dataState] || s.dataState; $('#dState').className = s.dataState === 'ok' ? 'pos' : 'neg';
+    $('#dPrice').textContent = s.lastPrice == null ? '—' : (+s.lastPrice).toFixed(5);
+    $('#dBlock').textContent = s.blockReason ? 'Sinais suspensos: ' + s.blockReason : '';
+    ageBase = s.dataAgeMs == null ? null : Date.now() - s.dataAgeMs;
+    if (!s.connected && !s.tradingEnabled) {} else if (!s.connected && s.tradingEnabled) switchView('conn');
   },
   candles(d) { candles = d.candles; series.setData(candles.map(c => ({ time: c.epoch, open: c.open, high: c.high, low: c.low, close: c.close }))); chart.timeScale().scrollToRealTime(); drawMarkers(); },
   candle(c) { series.update({ time: c.epoch, open: c.open, high: c.high, low: c.low, close: c.close }); },
-  signal(s) { signal = s; renderSignal(); drawMarkers(); if (s) toast(`Sinal ${s.direction === 'CALL' ? 'de COMPRA' : 'de VENDA'}${s.confidence != null ? ' · ' + Math.round(s.confidence * 100) + '%' : ''}`, s.direction === 'CALL' ? 'ok' : 'warn'); },
+  notify(n) { notifyUser(n); loadSignals(); },
+  signal(s) { signal = s && s.status === 'valido' ? s : null; renderSignal(); drawMarkers(); if (s && s.status === 'valido') toast(`Sinal ${s.direction === 'CALL' ? 'de COMPRA' : 'de VENDA'}${s.confidence != null ? ' · ' + Math.round(s.confidence * 100) + '%' : ''}`, s.direction === 'CALL' ? 'ok' : 'warn'); },
   trade_open(o) { open = o; renderOpen(); drawMarkers(); },
   trade_update(o) { open = o; renderOpen(); drawMarkers(); },
   trade_closed(t) { open = null; trades.push(t); renderOpen(); drawMarkers(); renderTrades(); toast(`${t.win ? 'Ganhou' : 'Perdeu'} ${fmt(t.profit)}`, t.win ? 'ok' : 'warn'); },
@@ -290,6 +325,21 @@ const on = {
 
 // ---------- Renderização ----------
 function now() { return Date.now() / 1000 + offset; }
+let ageBase = null, audio = null;
+function beep(f) { try { audio = audio || new AudioContext(); const o = audio.createOscillator(), g = audio.createGain(); o.frequency.value = f; g.gain.value = .15; o.connect(g).connect(audio.destination); o.start(); o.stop(audio.currentTime + .25); } catch {} }
+function notifyUser(n) {
+  if (!$('#nOn').checked) return;
+  beep(n.kind === 'sinal' ? 880 : 330);
+  if ('Notification' in window && Notification.permission === 'granted') new Notification('Trade AI Core', { body: n.text, tag: n.kind });
+  else toast(n.text, n.kind === 'sinal' ? 'ok' : 'warn');
+}
+async function loadSignals() {
+  try {
+    const r = await (await fetch('/api/signals')).json(), st = r.stats;
+    $('#sigStat').textContent = `${st.avaliados} · ${st.favoraveis}${st.taxa != null ? ' (' + Math.round(st.taxa * 100) + '%)' : ''} de ${st.total}`;
+    $('#sigList').innerHTML = r.signals.slice(-30).reverse().map(x => `<div>${new Date(x.createdAt).toLocaleTimeString('pt-BR')} ${x.direction} ${esc(x.symbol)} ${x.tf}/exp ${x.expiryMin}m · ${x.status}${x.outcome ? ' · ' + x.outcome : ''}${x.invalidReason ? ' · ' + esc(x.invalidReason) : ''}</div>`).join('') || '<div>Nenhum sinal ainda.</div>';
+  } catch {}
+}
 function renderSignal() {
   const el = $('#signal');
   if (!signal || now() >= signal.expiresAt) { el.className = 'signal'; el.innerHTML = '<div class="none">Aguardando confluência de padrões e indicadores…</div>'; return; }
@@ -297,6 +347,7 @@ function renderSignal() {
   const total = Math.max(1, signal.expiresAt - signal.candleOpen);
   el.className = 'signal ' + (up ? 'call' : 'put');
   el.innerHTML = `<div class="dir">${up ? 'COMPRA ▲' : 'VENDA ▼'}</div>
+    <div class="meta">${signal.symbol} · gráfico ${signal.tf} · expiração ${signal.expiryMin} min · válido para entrada por <b>${left}s</b> · dado com ${signal.dataAgeMs} ms</div>
     <div class="meta">${signal.confidence != null ? 'Probabilidade estimada pela Claude: <b>' + Math.round(signal.confidence * 100) + '%</b>' : 'Sem validação da Claude (chave não configurada)'}</div>
     <div class="meta">${esc(signal.reason || '')}</div>
     ${signal.rule ? `<div class="meta">Catálogo: ${(signal.rule.rate * 100).toFixed(0)}% fora da amostra (${signal.rule.n} casos)</div>` : ''}
@@ -413,8 +464,13 @@ $('#cGo').onclick = async () => { $('#cGo').disabled = true; try { await call('c
 $('#cForget').onclick = () => call('forget').then(() => toast('Dados salvos removidos', 'ok')).catch(() => {});
 fetch('/api/trades').then(r => r.json()).then(t => { trades = t; renderTrades(); }).catch(() => {});
 
-setInterval(() => { renderSignal(); if (open) renderOpen(); if (signal && now() >= signal.expiresAt) drawMarkers(); $('#clock').textContent = new Date(now() * 1000).toLocaleTimeString('pt-BR'); }, 1000);
+setInterval(() => { renderSignal(); if (open) renderOpen(); if (signal && now() >= signal.expiresAt) drawMarkers(); if (ageBase != null) $('#dAge').textContent = ((Date.now() - ageBase) / 1000).toFixed(1) + ' s'; $('#clock').textContent = new Date(now() * 1000).toLocaleTimeString('pt-BR'); }, 1000);
 connect();
+document.querySelectorAll('#exp button').forEach(b => b.onclick = () => call('config', { expiryMin: +b.dataset.e }).catch(() => {}));
+$('#maxAge').onchange = () => call('config', { maxDataAgeSec: +$('#maxAge').value }).catch(() => {});
+$('#nOn').onchange = () => { if ($('#nOn').checked && 'Notification' in window && Notification.permission === 'default') Notification.requestPermission(); };
+document.addEventListener('click', () => { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission(); }, { once: true });
+loadSignals(); setInterval(loadSignals, 30000);
 </script>
 </body>
 </html>
