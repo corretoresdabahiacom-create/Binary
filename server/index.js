@@ -7,7 +7,7 @@ const { WebSocketServer } = require('ws');
 const { Engine } = require('./engine');
 const { createGuard } = require('./access');
 
-const PORT = Number(process.env.PORT || 3000);
+const PORT = Number(process.env.PORT || 3010); // 3000 costuma estar ocupada (ex.: Tailscale)
 const HOST = '127.0.0.1'; // nunca exponha: o servidor guarda tokens de negociação
 const CONFIG = path.join(__dirname, '..', 'data', 'config.json');
 

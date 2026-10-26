@@ -8,6 +8,7 @@ set NV=%NV:v=%
 if %NV% LSS 20 (echo [ERRO] Node.js %NV% detectado; e preciso 20 ou superior. & pause & exit /b 1)
 if not exist node_modules (echo Instalando dependencias... & call npm install --omit=dev || (echo [ERRO] npm install falhou. & pause & exit /b 1))
 echo O monitor continua rodando mesmo com o navegador fechado. Para parar, feche esta janela.
-start "" http://localhost:3000
+if not defined PORT set PORT=3010
+start "" http://localhost:%PORT%
 node server/index.js
 pause

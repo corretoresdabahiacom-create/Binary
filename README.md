@@ -4,7 +4,7 @@
 
 Monitor de mercado para **decisão manual**: o app mostra o gráfico, emite CALL/PUT (ou fica em AGUARDAR) e alerta você; **não envia ordens** (`TRADING_ENABLED=0`, padrão).
 
-**Como rodar no Windows:** instale Node.js 20+ (nodejs.org), descompacte o ZIP, dê dois cliques em `iniciar.bat`. Abre em http://localhost:3000. Nenhum token é necessário para o MVP.
+**Como rodar no Windows:** instale Node.js 20+ (nodejs.org), descompacte o ZIP, dê dois cliques em `iniciar.bat`. Abre em http://localhost:3010. Nenhum token é necessário para o MVP.
 
 **O que o MVP faz**
 - Dados da **API oficial da Deriv** (WebSocket público), índices sintéticos (Volatility). Fonte identificada na tela.
