@@ -176,6 +176,8 @@ details summary{cursor:pointer;color:var(--mute);font-size:12px;text-transform:u
         <div id="posBox"></div>
         <div id="bestBox" class="card" style="margin-bottom:10px;padding:10px"><b>Melhor par</b><div class="hint">Carregando…</div></div>
         <div class="warnbox" id="modeBanner" style="margin-bottom:10px">MODO SÓ ANÁLISE — o app não envia ordens. Você decide e opera manualmente na corretora.</div>
+        <h3>Fluxo de ticks (tape)</h3>
+        <div id="flowBox" class="hint">Aguardando ticks…</div>
         <h3>Probabilidade ao vivo</h3>
         <div id="prob" class="hint">Carregando histórico da Deriv para o modelo…</div>
         <div class="row" style="margin-top:8px;gap:8px">
@@ -441,7 +443,7 @@ const on = {
     $('#dModel').textContent = s.model ? `${s.model.samples} amostras · ${s.model.horizon} vela(s)` : 'indisponível';
     for (const [id, k, f] of [['minProb', 'minProb', 100], ['minSamples', 'minSamples', 1]]) if (document.activeElement !== $('#' + id)) $('#' + id).value = Math.round(s.cfg[k] * f);
     { const k = posKey(); positions = s.positions || []; renderPos(); if (k !== posKey()) drawMarkers(); }
-    drawLevels(s.levels); renderAnalysis(); renderFilters();
+    drawLevels(s.levels); renderFlow(s.flow); renderAnalysis(); renderFilters();
     if (s.prob) renderProb(s.prob);
     $('#dPrice').textContent = s.lastPrice == null ? '—' : (+s.lastPrice).toFixed(5);
     $('#dBlock').textContent = s.blockReason ? 'Sinais suspensos: ' + s.blockReason : '';
@@ -453,6 +455,7 @@ const on = {
   prob(p) { renderProb(p); },
   opportunity(o) { onOpportunity(o); loadSignals(); },
   scan(l) { renderScan(l); },
+  flow(f) { renderFlow(f); },
   positions(ps) { const k = posKey(); positions = ps || []; renderPos(); renderBig(); if (k !== posKey()) drawMarkers(); },
   research() { loadResearch(); },
   notify(n) { notifyUser(n); loadSignals(); },
@@ -488,6 +491,14 @@ function renderProb(p) {
 let lastProb = null;
 let positions = [];
 const posKey = () => positions.map(p => p.id + p.status).join('|');
+function renderFlow(f) {
+  const el = $('#flowBox'); if (!f) return; if (f.erro) { el.textContent = f.erro; return; }
+  const bar = (w, nome) => { const up = w.alta + w.baixa ? Math.round(100 * w.alta / (w.alta + w.baixa)) : 50;
+    return `<div style="display:flex;align-items:center;gap:6px;margin-top:4px"><span style="width:42px">${nome}</span>
+      <div style="flex:1;display:flex;height:14px;border-radius:4px;overflow:hidden;font-size:10px;color:#fff"><div style="width:${up}%;background:#26a69a;padding-left:3px">${w.alta}</div><div style="width:${100 - up}%;background:#ef5350;text-align:right;padding-right:3px">${w.baixa}</div></div>
+      <span style="width:62px;text-align:right">${w.porMin}/min</span></div>`; };
+  el.innerHTML = bar(f.w1, '1 min') + bar(f.w5, '5 min') + bar(f.w15, '15 min') + '<div class="hint" style="margin-top:4px">Ticks de alta × de baixa (a Deriv não informa volume). Ver resultado do teste antes de usar.</div>';
+}
 function renderPos() {
   const el = $('#posBox'); if (!positions.length) { el.innerHTML = ''; return; }
   const mmss = x => `${Math.floor(x / 60)}:${String(x % 60).padStart(2, '0')}`;

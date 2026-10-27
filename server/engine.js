@@ -88,7 +88,7 @@ class Engine extends EventEmitter {
       lastPrice: this.candles.length ? this.candles[this.candles.length - 1].close : null,
       allowedExpiries: research.contractRules(this.symbol).expiries,
       perf: { tickMsAvg: this.perf.tickMsAvg == null ? null : +this.perf.tickMsAvg.toFixed(2), tickMsMax: +Math.max(this.perf.tickMsMax, this.perf.tickMsMaxPrev || 0).toFixed(2), loopLagP99Ms: this.perf.loopLagP99Ms },
-      levels: this.levels || null, analysis: this.analysis || null, positions: this.positions, expiries: EXPIRIES, tfs: Object.keys(GRANS), prob: this.prob, tickLatencyMs: this.tickLatencyMs,
+      flow: this.flow || null, levels: this.levels || null, analysis: this.analysis || null, positions: this.positions, expiries: EXPIRIES, tfs: Object.keys(GRANS), prob: this.prob, tickLatencyMs: this.tickLatencyMs,
       model: this.model && { name: this.model.model, horizon: this.model.horizon, samples: this.model.samples, ties: this.model.ties, from: this.model.from, to: this.model.to },
       open: this.open && this._openView(),
       signal: this.signal,
@@ -339,7 +339,28 @@ class Engine extends EventEmitter {
   }
 
   // ---------- velas ----------
+  // ---------- fluxo de ticks (tape reading possível: só preço, sem volume/agressor) ----------
+  async subscribeTicks() {
+    if (this.tickSub) { this.pub.send({ forget: this.tickSub }).catch(() => {}); this.tickSub = null; }
+    this.ticks = []; this.flow = null;
+    try { const r = await this.pub.send({ ticks: this.symbol }, { subscribe: true, timeoutMs: 8000 }); this.tickSub = r.subscription && r.subscription.id; if (r.tick) this._onTick(r.tick); }
+    catch (e) { this.flow = { erro: 'fluxo de ticks indisponível: ' + e.message }; }
+  }
+  _onTick(tk) {
+    if (tk.symbol && tk.symbol !== this.symbol) return;
+    const q = +tk.quote, e = +tk.epoch; if (!Number.isFinite(q)) return;
+    const prev = this.ticks.at(-1), d = prev ? q - prev.q : 0;
+    this.ticks.push({ e, q, s: d > 0 ? 1 : d < 0 ? -1 : prev ? prev.s : 0 });
+    while (this.ticks.length && this.ticks[0].e < e - 900) this.ticks.shift();     // guarda 15 min
+    const nowMs = Date.now(); if (this._lastFlow && nowMs - this._lastFlow < 1000) return; this._lastFlow = nowMs;
+    const w = W => { const xs = this.ticks.filter(x => x.e > e - W); const up = xs.filter(x => x.s > 0).length, dn = xs.filter(x => x.s < 0).length;
+      return { ticks: xs.length, porMin: +(xs.length / (W / 60)).toFixed(1), alta: up, baixa: dn, desequilibrio: up + dn ? +((up - dn) / (up + dn)).toFixed(3) : 0 }; };
+    this.flow = { e, w1: w(60), w5: w(300), w15: w(900), nota: 'regra do tick (sem volume na Deriv); teste em scripts/fluxo.js' };
+    this.emit('flow', this.flow);
+  }
+
   async subscribeCandles() {
+    this.subscribeTicks().catch(() => {});
     if (this.subId) { this.pub.send({ forget: this.subId }).catch(() => {}); this.subId = null; }
     const res = await this.pub.send({ ticks_history: this.symbol, style: 'candles', granularity: this.gran(), count: 500, end: 'latest' }, { subscribe: true, timeoutMs: 30000 });
     this.subId = res.subscription && res.subscription.id;
@@ -367,6 +388,7 @@ class Engine extends EventEmitter {
   }
 
   _onPublic(m) {
+    if (m.tick) return this._onTick(m.tick);
     if (!m.ohlc) return;
     const t0 = performance.now();
     try { this._onOhlc(m); } finally {

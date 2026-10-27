@@ -221,3 +221,15 @@ test('expirações oferecidas: 15 e 60 min; 5 min recusado', async () => {
     assert.strictEqual(e.cfg.expiryMin, 15, 'valor inválido herdado é ajustado ao trocar de mercado');
   } finally { done(e); }
 });
+
+test('fluxo de ticks: regra do tick, janelas de 1/5/15 min e descarte do antigo', () => {
+  const { Engine } = require('../server/engine');
+  const e = new Engine(); e.symbol = 'frxEURUSD'; e.ticks = [];
+  const t0 = 1e9; let q = 1.1;
+  for (let i = 0; i < 1200; i++) { q += (i % 4 === 0 ? -1e-5 : 1e-5); e._lastFlow = 0; e._onTick({ symbol: 'frxEURUSD', epoch: t0 + i, quote: +q.toFixed(5) }); }
+  const f = e.flow;
+  assert.ok(e.ticks.length <= 901, 'guarda só 15 min');
+  assert.ok(f.w1.ticks >= 59 && f.w1.ticks <= 60);
+  assert.ok(Math.abs(f.w5.desequilibrio - 0.5) < 0.02, `3 altas : 1 baixa → +0,5 (${f.w5.desequilibrio})`);
+  e._onTick({ symbol: 'frxGBPUSD', epoch: t0 + 2000, quote: 9 }); assert.strictEqual(e.ticks.at(-1).q !== 9, true, 'ignora outro ativo');
+});
