@@ -39,6 +39,14 @@ Monitor de mercado para **decisão manual**: o app mostra o gráfico, emite CALL
 - **Alertas no Windows** (notificação do navegador + som) para sinal, invalidação, dados atrasados e retomada. Permita notificações quando o navegador pedir.
 - **Segundo plano:** o monitor roda na janela do `iniciar.bat`; pode fechar/minimizar o navegador. Para os alertas do Windows, mantenha ao menos uma aba aberta (pode ficar minimizada). Fechar a janela do monitor, desligar ou suspender o PC para tudo.
 
+**Resultados com dados e preços reais da Deriv (27/10/2026; walk-forward, correção para múltiplos testes)**
+- Forex Rise/Fall 15 min (10 pares, payout real ~78%, empate ~56%): v3 50,3% em 1.039 operações — nenhuma combinação aprovada.
+- Rise/Fall em ouro, prata, 6 índices de ações e forex 60 min (payout 67–82%): nenhuma aprovada.
+- Multiplicadores (BTC, ETH, ouro, prata, EUR/USD, GBP/USD, USD/JPY; comissão real): média por operação negativa em todos (≈ −comissão), igual a "sempre comprar".
+- Contratos com barreira de 1 dia (Higher/Lower, Touch/No Touch, Ends/Stays In/Out; 35 h até o fim do dia seguinte): nenhum acima do preço da Deriv. A 1ª rodada (vela de 24 h) mostrava falsas vantagens em RANGE/NOTOUCH — erro de simulação, corrigido.
+- Índices sintéticos (Volatility, dígitos etc.): gerados por sorteio; sem vantagem possível.
+Scripts: `npm run backtest2`, `node scripts/backtest-contratos.js [1,2,3]`, `node scripts/discover.js`.
+
 **O que o MVP NÃO faz (honestamente)**
 - **IQ Option:** sem API pública oficial; não implementado. O app não usa senha, cookies nem endpoints privados.
 - **OTC:** não suportado. Os sintéticos da Deriv não são OTC de outra corretora.
