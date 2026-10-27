@@ -88,3 +88,16 @@ test('scanner: combinação não aprovada gera registro "sombra" (teste ao vivo)
     assert.ok(r.outcome, 'resultado avaliado'); assert.strictEqual(r.status, 'sombra', 'continua marcado como sombra');
   } finally { require('fs').unlinkSync(R.RESEARCH_FILE()); }
 });
+
+test('gravador de ticks: um arquivo por ativo e dia, sem perder ticks', () => {
+  const fs = require('fs'), path = require('path');
+  const sc = new Scanner({ getCfg: () => cfg, symbols: ['frxEURUSD'], tfs: ['15m'] });
+  const day = Date.UTC(2026, 9, 27) / 1000;
+  sc._recordTick({ symbol: 'frxEURUSD', epoch: day + 10, quote: 1.16123 });
+  sc._recordTick({ symbol: 'frxEURUSD', epoch: day + 11, quote: 1.16125 });
+  sc._recordTick({ symbol: 'frxGBPUSD', epoch: day + 86400 + 5, quote: 1.3 });
+  clearTimeout(sc._tickFlush); sc.flushTicks();
+  const dir = path.join(process.env.DATA_DIR, 'ticks');
+  assert.strictEqual(fs.readFileSync(path.join(dir, 'frxEURUSD-20261027.csv'), 'utf8'), `${day + 10},1.16123\n${day + 11},1.16125\n`);
+  assert.ok(fs.existsSync(path.join(dir, 'frxGBPUSD-20261028.csv')));
+});

@@ -53,12 +53,35 @@ class Scanner extends EventEmitter {
   async start() {
     this.sock = deriv.publicSocket();
     this.sock.label = 'scanner';
-    this.sock.on('message', m => m.ohlc && this._onOhlc(m.ohlc));
+    this.sock.on('message', m => { if (m.ohlc) this._onOhlc(m.ohlc); else if (m.tick) this._recordTick(m.tick); });
     this.sock.on('reconnected', () => this._subscribeAll().catch(() => {}));
     this.sock.on('warn', w => this.emit('log', w));
     await this.sock.connect();
     try { const t = await this.sock.send({ time: 1 }); this.serverOffset = t.time - Date.now() / 1000; } catch {}
     await this._subscribeAll();
+    this._subscribeTicks().catch(() => {});
+  }
+
+  // Gravador de ticks: a Deriv guarda só ~1 dia de ticks de forex; acumulamos localmente para o teste de fluxo.
+  // Arquivo por ativo e dia (UTC): data/ticks/<ativo>-<AAAAMMDD>.csv com "epoch,preço". Desligue com TICKS=0.
+  async _subscribeTicks() {
+    if (process.env.TICKS === '0') return;
+    const syms = [...new Set([...this.streams.values()].map(s => s.sym))];
+    for (const sym of syms) { try { await this.sock.send({ ticks: sym }, { subscribe: true, timeoutMs: 8000 }); } catch (e) { this.emit('log', `ticks ${sym}: ${e.message}`); } }
+  }
+  _recordTick(tk) {
+    const e = +tk.epoch, q = tk.quote; if (!tk.symbol || !Number.isFinite(e)) return;
+    const day = new Date(e * 1000).toISOString().slice(0, 10).replace(/-/g, '');
+    this._tickBuf = this._tickBuf || new Map();
+    const k = `${tk.symbol}-${day}`; (this._tickBuf.get(k) || this._tickBuf.set(k, []).get(k)).push(`${e},${q}`);
+    if (!this._tickFlush) { this._tickFlush = setTimeout(() => this.flushTicks(), 10000); if (this._tickFlush.unref) this._tickFlush.unref(); }
+  }
+  flushTicks() {
+    this._tickFlush = null; if (!this._tickBuf) return;
+    const dir = path.join(process.env.DATA_DIR || path.join(__dirname, '..', 'data'), 'ticks');
+    try { require('fs').mkdirSync(dir, { recursive: true }); for (const [k, lines] of this._tickBuf) require('fs').appendFileSync(path.join(dir, k + '.csv'), lines.join('\n') + '\n'); }
+    catch (e) { this.emit('log', 'gravar ticks: ' + e.message); }
+    this._tickBuf.clear();
   }
 
   stop() { if (this.sock) { this.sock.removeAllListeners(); this.sock.close(); this.sock = null; } }

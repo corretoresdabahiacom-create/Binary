@@ -17,6 +17,14 @@ const NM = s => s.replace('frx', '').replace(/(...)(...)/, '$1/$2');
 const pct = x => (x == null ? '  -  ' : (x * 100).toFixed(1).padStart(5) + '%');
 const wait = ms => new Promise(r => setTimeout(r, ms));
 
+// ticks gravados pelo monitor (data/ticks/<ativo>-<dia>.csv)
+function localTicks(sym) {
+  const fs = require('fs'), path = require('path'), dir = path.join(process.env.DATA_DIR || path.join(__dirname, '..', 'data'), 'ticks');
+  const m = new Map();
+  try { for (const f of fs.readdirSync(dir).filter(f => f.startsWith(sym + '-')).sort()) for (const l of fs.readFileSync(path.join(dir, f), 'utf8').split('\n')) { const [e, q] = l.split(','); if (e && q) m.set(+e, +q); } } catch {}
+  return m;
+}
+
 async function fetchTicks(sock, sym, max) {
   let end = 'latest', t = [], p = [];
   while (t.length < max) {
@@ -42,7 +50,12 @@ function at(t, x) { let lo = 0, hi = t.length - 1, r = -1; while (lo <= hi) { co
   const rows = [], perPair = {};
   for (const sym of SYMS) {
     let tk, cs;
-    try { tk = await fetchTicks(sock, sym, MAXT); cs = await fetchHistory(sock, sym, 900, 2, () => {}, 10000); }
+    try {
+      tk = await fetchTicks(sock, sym, MAXT); cs = await fetchHistory(sock, sym, 900, 2, () => {}, 10000);
+      const m = localTicks(sym); const before = m.size; for (let i = 0; i < tk.t.length; i++) m.set(tk.t[i], tk.p[i]);
+      const ks = [...m.keys()].sort((a, b) => a - b); tk = { t: ks, p: ks.map(k => m.get(k)) };
+      if (before) console.log(`  + ${before} ticks gravados localmente`);
+    }
     catch (e) { console.log(`${NM(sym)}: PULADO ${e.message}`); continue; }
     await wait(2000);
     const { t, p } = tk;
