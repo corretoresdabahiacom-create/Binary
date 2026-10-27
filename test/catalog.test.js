@@ -77,3 +77,15 @@ test('histórico: pagina quando a Deriv devolve só 1.000 velas por pedido', asy
   const h2 = await fetchHistory({ send: async q => { const end = q.end === 'latest' ? 1e9 : +q.end; return { candles: Array.from({ length: 1000 }, (_, i) => ({ epoch: end - (1000 - i) * 60, open: 1, high: 1, low: 1, close: 1 })) }; } }, 'R_100', 60, 2, () => {}, 10000);
   assert.strictEqual(h2.length, 10000);
 });
+
+test('histórico: espera e tenta de novo quando a Deriv limita a frequência', async () => {
+  const { fetchHistory } = require('../server/catalog');
+  let calls = 0; const waits = [];
+  const realSet = global.setTimeout; global.setTimeout = (fn) => realSet(fn, 0);   // sem esperar de verdade no teste
+  try {
+    const sock = { send: async q => { calls++; if (calls === 1) throw Object.assign(new Error('You have reached the rate limit for ticks_history_expensive.'), { code: 'RateLimit' });
+      const end = q.end === 'latest' ? 6000 : +q.end; const n = Math.min(100, Math.floor(end / 60)); return { candles: Array.from({ length: n }, (_, i) => ({ epoch: end - (n - i) * 60, open: 1, high: 1, low: 1, close: 1 })) }; } };
+    const h = await fetchHistory(sock, 'X', 60, 1, p => p.waitingMs && waits.push(p.waitingMs), 100);
+    assert.strictEqual(h.length, 100); assert.deepStrictEqual(waits, [15000]);
+  } finally { global.setTimeout = realSet; }
+});

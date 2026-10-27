@@ -154,7 +154,16 @@ async function fetchHistory(sock, symbol, granularity, pages = 4, onProgress = (
   let end = 'latest';
   let all = [];
   for (let p = 0; p < pages * 10 && all.length < maxCandles; p++) {
-    const res = await sock.send({ ticks_history: symbol, style: 'candles', granularity, count: 5000, end }, { timeoutMs: 30000 });
+    let res;
+    for (let tries = 0; ; tries++) {                       // limite de frequência da Deriv: espera e tenta de novo
+      try { res = await sock.send({ ticks_history: symbol, style: 'candles', granularity, count: 5000, end }, { timeoutMs: 30000 }); break; }
+      catch (e) {
+        if (!/rate limit|RateLimit/i.test(e.message + (e.code || '')) || tries >= 8) throw e;
+        const wait = Math.min(120000, 15000 * (tries + 1));
+        onProgress({ page: p + 1, pages, candles: all.length, waitingMs: wait, reason: 'limite de frequência da Deriv' });
+        await new Promise(r => setTimeout(r, wait));
+      }
+    }
     const cs = (res.candles || []).map(c => ({ epoch: c.epoch, open: +c.open, high: +c.high, low: +c.low, close: +c.close }));
     if (!cs.length) break;
     all = cs.concat(all);

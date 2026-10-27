@@ -25,7 +25,10 @@ async function payoutOf(sock, sym, exp) {
   const sock = deriv.publicSocket(); await sock.connect();
   const results = {}, meta = {};
   for (const sym of syms) for (const tf of tfs) {
-    const c = await fetchHistory(sock, sym, TFS[tf], 2, () => {}, 10000);
+    let c;
+    try { c = await fetchHistory(sock, sym, TFS[tf], 2, p => p.waitingMs && console.log(`  (aguardando ${p.waitingMs / 1000} s: ${p.reason})`), 10000); }
+    catch (e) { console.log(`${(NAMES[sym] || sym).padEnd(15)} ${tf.padEnd(3)} PULADO: ${e.message}`); continue; }
+    await new Promise(r => setTimeout(r, 3000));           // espaça os pedidos para não disputar com o monitor
     for (const exp of require('../server/research').contractRules(sym).expiries) {
       const key = `${sym}|${tf}|${exp}`;
       const pay = await payoutOf(sock, sym, exp);
