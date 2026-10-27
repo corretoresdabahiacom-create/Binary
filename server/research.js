@@ -160,6 +160,9 @@ function saveResearch(obj) { fs.mkdirSync(DATA_DIR(), { recursive: true }); fs.w
 const isForex = sym => /^frx/.test(sym);
 const clock = { now: () => Date.now() / 1000 };            // injetável nos testes
 function contractRules(sym) { return { expiries: isForex(sym) ? [15] : [5, 15] }; }
+// Expirações intradiárias de Rise/Fall oferecidas pela Deriv (contracts_for, out/2026), usadas na pesquisa.
+const isMetal = sym => /^frxX(AU|AG)USD$/.test(sym);
+function researchExpiries(sym) { return isMetal(sym) ? [5, 15, 60] : /^OTC_/.test(sym) ? [15, 60] : isForex(sym) ? [15, 60] : [5, 15]; }
 function tradeable(sym, epoch) {
   if (!isForex(sym)) return true;
   const d = new Date(epoch * 1000), m = d.getUTCHours() * 60 + d.getUTCMinutes();
@@ -193,5 +196,5 @@ function baseDecision(candles, i, est, combo, cfg, fresh) {
   return { ok: d.ok, version: 'v2', approved: !!art.approved, direction: d.direction, p: d.q, ev: d.ev, be: d.be, reason: d.reason };
 }
 
-module.exports = { clock, liveDecision, contractRules, tradeable, fitIsotonic, applyIsotonic, session, SESSIONS, features, FEATURE_NAMES, fitLogistic, predictLogistic, sigmoid,
+module.exports = { researchExpiries, clock, liveDecision, contractRules, tradeable, fitIsotonic, applyIsotonic, session, SESSIONS, features, FEATURE_NAMES, fitLogistic, predictLogistic, sigmoid,
   decide, binomTailP, benjaminiHochberg, loadResearch, artifact, saveResearch, RESEARCH_FILE };

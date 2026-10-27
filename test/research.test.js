@@ -85,3 +85,22 @@ test('regras da Deriv para forex: só 15 min e sem negociação 20:50–22:00 UT
   const d = R.liveDecision([], 0, est, { symbol: 'frxEURUSD', tf: '5m', expiryMin: 5 }, { minSamples: 40, minProb: 0.56 }, true);
   assert.strictEqual(d.ok, false); assert.match(d.reason, /mínimo 15/);
 });
+
+test('barreiras: eventos complementares e k=0 = Rise/Fall do dia', () => {
+  const { barrierEvents } = require('../server/backtest2');
+  const c = walk(400, 31);
+  const e = barrierEvents(c, 1);
+  e.ONETOUCH_alta.forEach((x, i) => assert.strictEqual(x, !e.NOTOUCH_alta[i]));
+  e.RANGE.forEach((x, i) => assert.strictEqual(x, !e.UPORDOWN[i]));
+  e.EXPIRYRANGE.forEach((x, i) => assert.strictEqual(x, !e.EXPIRYMISS[i]));
+  const z = barrierEvents(c, 0); assert.deepStrictEqual(z.HIGHER, c.slice(15).map(x => x.close > x.open));
+});
+
+test('multiplicadores: no ruído o resultado médio fica perto de −comissão (sem vantagem)', () => {
+  const { evaluateMultiplier } = require('../server/backtest2');
+  const c = walk(6000, 41).map(x => ({ ...x, open: x.open + 1000, high: x.high + 1000, low: x.low + 1000, close: x.close + 1000 }));
+  const r = evaluateMultiplier(c, { gran: 300, hold: 3, mult: 50, commission: 0.01 });
+  assert.ok(r.modelo.n > 50);
+  assert.ok(Math.abs(r.modelo.mediaPorOp + 0.01) < 0.03, `média ${r.modelo.mediaPorOp}`);
+  assert.ok(r.modelo.pValue > 0.05);
+});

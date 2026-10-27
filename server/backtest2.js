@@ -104,4 +104,53 @@ function approve(results, { fdr = 0.1, minTrades = 30 } = {}) {
   return results;
 }
 
-module.exports = { evaluateCombo, approve, trainArtifacts };
+// ---------- Multiplicadores ----------
+// Direção pelo mesmo modelo (calibração + meta, treinados só no passado); mantém h velas; resultado em
+// múltiplos do valor investido: mult × movimento − comissão, limitado a −1 (stop-out da Deriv). Sem sobreposição.
+function evaluateMultiplier(c, { gran, hold, mult, commission, minSamples = 40, edgeMargin = 0.02, start = 3000, fold = 1000 } = {}) {
+  const emb = hold + 2, tr = [], longOnly = [];
+  let next = -1, nextL = -1;
+  for (let t0 = start; t0 + hold < c.length - 1; t0 += fold) {
+    const art = trainArtifacts(c, t0 - emb, hold, minSamples);
+    for (let t = t0; t < Math.min(t0 + fold, c.length - 1 - hold); t++) {
+      const e = estimate(art.model, c, t, minSamples); if (!e) continue;
+      const pnl = sgn => {
+        const entry = c[t].close; let worst = 0;
+        for (let j = t + 1; j <= t + hold; j++) worst = Math.min(worst, sgn * ((sgn > 0 ? c[j].low : c[j].high) - entry) / entry);
+        if (mult * worst <= -1) return -1;                     // stop-out
+        return Math.max(-1, mult * sgn * (c[t + hold].close - entry) / entry) - commission;
+      };
+      if (t >= nextL) { longOnly.push(pnl(1)); nextL = t + hold; }
+      if (t < next) continue;
+      const d = R.decide(c, t, e, { iso: art.iso, meta: art.meta, payout: 1, approved: true }, { edgeMargin });
+      if (!d.ok) continue;
+      tr.push(pnl(d.direction === 'CALL' ? 1 : -1)); next = t + hold;
+    }
+  }
+  const st = a => { const n = a.length; if (!n) return { n: 0 }; const m = a.reduce((x, y) => x + y, 0) / n; const sd = Math.sqrt(a.reduce((x, y) => x + (y - m) ** 2, 0) / Math.max(1, n - 1));
+    const tstat = sd ? m / (sd / Math.sqrt(n)) : 0; const p = 0.5 * (1 - erf(tstat / Math.SQRT2));
+    return { n, mediaPorOp: m, acerto: a.filter(x => x > 0).length / n, stopOuts: a.filter(x => x <= -1).length, t: tstat, pValue: p }; };
+  return { hold, mult, commission, modelo: st(tr), sempreCompra: st(longOnly) };
+}
+function erf(x) { const s = Math.sign(x); x = Math.abs(x); const t = 1 / (1 + 0.3275911 * x); return s * (1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x)); }
+
+// ---------- Contratos com barreira (estático) ----------
+// Compara a probabilidade embutida no preço da Deriv (valor investido ÷ payout) com a frequência histórica
+// do evento, com a barreira à mesma distância em ATRs diárias. Entrada na abertura do dia; toque pela máxima/
+// mínima do dia; término pelo fechamento.
+function barrierEvents(c, k) {
+  const { atr } = require('./indicators'); const A = atr(c, 14);
+  const ev = { ONETOUCH_alta: [], ONETOUCH_baixa: [], NOTOUCH_alta: [], NOTOUCH_baixa: [], HIGHER: [], LOWER: [], EXPIRYRANGE: [], EXPIRYMISS: [], RANGE: [], UPORDOWN: [] };
+  for (let i = 15; i < c.length; i++) {
+    const a = A[i - 1]; if (!a) continue;                    // ATR conhecido antes do dia i
+    const o = c[i].open, hi = c[i].high, lo = c[i].low, cl = c[i].close, up = o + k * a, dn = o - k * a;
+    ev.ONETOUCH_alta.push(hi >= up); ev.NOTOUCH_alta.push(hi < up);
+    ev.ONETOUCH_baixa.push(lo <= dn); ev.NOTOUCH_baixa.push(lo > dn);
+    ev.HIGHER.push(cl > up); ev.LOWER.push(cl < dn);
+    ev.EXPIRYRANGE.push(cl > dn && cl < up); ev.EXPIRYMISS.push(cl >= up || cl <= dn);
+    ev.RANGE.push(hi < up && lo > dn); ev.UPORDOWN.push(hi >= up || lo <= dn);
+  }
+  return ev;
+}
+
+module.exports = { evaluateCombo, approve, trainArtifacts, evaluateMultiplier, barrierEvents };
