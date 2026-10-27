@@ -71,7 +71,7 @@ async function barriers(sock) {
   const rows = [];
   for (const sym of syms) {
     let c; try { c = await hist(sock, sym, 86400, 5000); } catch (e) { console.log(`${nm(sym)} PULADO: ${e.message}`); continue; }
-    if (c.length < 300) { console.log(`${nm(sym)} PULADO: só ${c.length} dias`); continue; }
+    if (c.length < 200) { console.log(`${nm(sym)} PULADO: só ${c.length} dias`); continue; }   // a Deriv só fornece ~1 ano de velas diárias
     const A = atr(c, 14).at(-1);
     let spot, dec;
     try { const p = await proposal(sock, { contract_type: 'CALL', underlying_symbol: sym, duration: 1, duration_unit: 'd' }); spot = +p.spot; dec = (String(p.spot).split('.')[1] || '').length; }
