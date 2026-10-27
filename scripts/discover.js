@@ -11,18 +11,18 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   const act = await s.send({ active_symbols: 'brief' });
   const syms = act.active_symbols || [];
   const byMkt = {};
-  for (const a of syms) (byMkt[a.market_display_name || a.market] = byMkt[a.market_display_name || a.market] || []).push(a);
+  for (const a of syms) { a.symbol = a.underlying_symbol || a.symbol; a.display_name = a.underlying_symbol_name || a.display_name; a.submarket_display_name = a.submarket; (byMkt[a.market] = byMkt[a.market] || []).push(a); }
   console.log('MERCADOS:');
   for (const [m, l] of Object.entries(byMkt)) console.log(` ${m.padEnd(22)} ${l.length} ativos · ex.: ${l.slice(0, 6).map(x => x.symbol).join(', ')}`);
   const sample = [];
   for (const [m, l] of Object.entries(byMkt)) {
     const open = l.filter(x => x.exchange_is_open);
-    sample.push(...(open.length ? open : l).slice(0, 3).map(x => ({ market: m, symbol: x.symbol, name: x.display_name, open: !!x.exchange_is_open, submarket: x.submarket_display_name })));
+    sample.push(...(open.length ? open : l).slice(0, 4).map(x => ({ market: m, symbol: x.symbol, name: x.display_name, open: !!x.exchange_is_open, submarket: x.submarket_display_name })));
   }
   const out = { generatedAt: new Date().toISOString(), markets: Object.fromEntries(Object.entries(byMkt).map(([m, l]) => [m, l.map(x => ({ symbol: x.symbol, name: x.display_name, submarket: x.submarket_display_name, open: !!x.exchange_is_open }))])), contracts: {} };
   for (const a of sample) {
     try {
-      const r = await s.send({ contracts_for: a.symbol });
+      const r = await s.send({ contracts_for: a.symbol });   // campo da API nova: contracts_for=<underlying_symbol>
       const av = (r.contracts_for && r.contracts_for.available) || [];
       const types = {};
       for (const c of av) {
