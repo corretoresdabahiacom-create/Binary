@@ -351,7 +351,13 @@ const series = chart.addCandlestickSeries({ upColor: '#26a69a', downColor: '#ef5
 new ResizeObserver(() => chart.applyOptions({ width: $('#chart').clientWidth, height: $('#chart').clientHeight })).observe($('#chart'));
 let priceLine = null;
 
-let srLines = [], histMarks = [];
+let srLines = [], histMarks = [], posLine = null, precision = 5;
+function setPrecision(cs) {
+  const dec = v => { const t = String(v); const k = t.indexOf('.'); return k < 0 ? 0 : t.length - k - 1; };
+  let d = 0; for (const c of cs.slice(-60)) d = Math.max(d, dec(c.open), dec(c.high), dec(c.low), dec(c.close));
+  precision = Math.min(6, Math.max(2, d));
+  series.applyOptions({ priceFormat: { type: 'price', precision, minMove: 1 / 10 ** precision } });
+}
 function drawLevels(lv) {
   for (const l of srLines) series.removePriceLine(l); srLines = [];
   if (!lv || !lv.levels) return;
@@ -382,8 +388,15 @@ function drawMarkers() {
     const up = open.direction === 'CALL';
     m.push({ time: open.candleOpen, position: 'inBar', color: '#4c8dff', shape: 'circle', text: 'ENTRADA ' + (up ? '▲' : '▼') });
   }
+  if (position && S && position.symbol === S.symbol) {
+    const g = ({ '5m': 300, '15m': 900, '1h': 3600 })[S.tf] || 300, t = Math.floor(position.entryAt / g) * g, up = position.direction === 'CALL';
+    if (known.has(t)) m.push({ time: t, position: up ? 'belowBar' : 'aboveBar', color: '#ffd666', shape: up ? 'arrowUp' : 'arrowDown', text: 'MINHA ENTRADA ' + (up ? 'CALL' : 'PUT') });
+  }
   m.sort((a, b) => a.time - b.time);
   series.setMarkers(m);
+  if (posLine) { series.removePriceLine(posLine); posLine = null; }
+  if (position && S && position.symbol === S.symbol)
+    posLine = series.createPriceLine({ price: position.entryPrice, color: '#ffd666', lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title: 'ENTRADA ' + position.direction });
   if (priceLine) { series.removePriceLine(priceLine); priceLine = null; }
   if (open && open.entrySpot) priceLine = series.createPriceLine({ price: open.entrySpot, color: '#4c8dff', lineWidth: 1, lineStyle: 2, title: 'entrada' });
 }
@@ -413,7 +426,7 @@ const on = {
     renderOpen(); renderSignal(); renderCatalogSub();
     document.querySelectorAll('.trading-only, #acct, [data-v="conn"], [data-v="history"]').forEach(e => e.style.display = s.tradingEnabled ? '' : 'none');
     $('#modeBanner').style.display = s.tradingEnabled ? 'none' : '';
-    document.querySelectorAll('#exp button').forEach(b => b.classList.toggle('on', +b.dataset.e === s.cfg.expiryMin));
+    document.querySelectorAll('#exp button').forEach(b => { const ok = !s.allowedExpiries || s.allowedExpiries.includes(+b.dataset.e); b.disabled = !ok; b.title = ok ? '' : 'A Deriv não oferece esta expiração neste mercado'; b.style.opacity = ok ? '' : '.35'; b.classList.toggle('on', +b.dataset.e === s.cfg.expiryMin); });
     if (document.activeElement !== $('#edgeMargin')) $('#edgeMargin').value = (s.cfg.edgeMargin * 100).toFixed(1);
     $('#allowUn').checked = !!s.cfg.allowUnapproved;
     if (document.activeElement !== $('#catFilter')) $('#catFilter').value = String(s.cfg.catalogFilter || 0);
@@ -425,7 +438,7 @@ const on = {
     if (s.perf) { $('#dProc').textContent = s.perf.tickMsAvg == null ? '—' : `${s.perf.tickMsAvg} / ${s.perf.tickMsMax} ms`; $('#dLag').textContent = s.perf.loopLagP99Ms == null ? '—' : s.perf.loopLagP99Ms + ' ms'; }
     $('#dModel').textContent = s.model ? `${s.model.samples} amostras · ${s.model.horizon} vela(s)` : 'indisponível';
     for (const [id, k, f] of [['minProb', 'minProb', 100], ['minSamples', 'minSamples', 1]]) if (document.activeElement !== $('#' + id)) $('#' + id).value = Math.round(s.cfg[k] * f);
-    position = s.position; renderPos();
+    { const had = position && position.entryAt; position = s.position; renderPos(); if ((had || null) !== ((position && position.entryAt) || null)) drawMarkers(); }
     drawLevels(s.levels); renderAnalysis(); renderFilters();
     if (s.prob) renderProb(s.prob);
     $('#dPrice').textContent = s.lastPrice == null ? '—' : (+s.lastPrice).toFixed(5);
@@ -433,12 +446,12 @@ const on = {
     ageBase = s.dataAgeMs == null ? null : Date.now() - s.dataAgeMs;
     if (!s.connected && !s.tradingEnabled) {} else if (!s.connected && s.tradingEnabled) switchView('conn');
   },
-  candles(d) { candles = d.candles; series.setData(candles.map(c => ({ time: c.epoch, open: c.open, high: c.high, low: c.low, close: c.close }))); chart.timeScale().scrollToRealTime(); drawMarkers(); loadHistMarks(); },
+  candles(d) { candles = d.candles; setPrecision(candles); series.setData(candles.map(c => ({ time: c.epoch, open: c.open, high: c.high, low: c.low, close: c.close }))); chart.timeScale().scrollToRealTime(); drawMarkers(); loadHistMarks(); },
   candle(c) { ageBase = Date.now(); series.update({ time: c.epoch, open: c.open, high: c.high, low: c.low, close: c.close }); },
   prob(p) { renderProb(p); },
   opportunity(o) { onOpportunity(o); loadSignals(); },
   scan(l) { renderScan(l); },
-  position(p) { position = p; renderPos(); renderBig(); },
+  position(p) { const had = !!position; position = p; renderPos(); renderBig(); if (had !== !!p) drawMarkers(); },
   research() { loadResearch(); },
   notify(n) { notifyUser(n); loadSignals(); },
   signal(s) { signal = s && s.status === 'valido' ? s : null; renderBig(); renderSignal(); drawMarkers(); if (s && s.status === 'valido') toast(`Sinal ${s.direction === 'CALL' ? 'de COMPRA' : 'de VENDA'}${s.confidence != null ? ' · ' + Math.round(s.confidence * 100) + '%' : ''}`, s.direction === 'CALL' ? 'ok' : 'warn'); },
@@ -464,7 +477,7 @@ function renderProb(p) {
       <div style="width:${c}%;background:#26a69a;display:flex;align-items:center;padding-left:6px">CALL ${c}%</div>
       <div style="width:${v}%;background:#ef5350;display:flex;align-items:center;justify-content:flex-end;padding-right:6px">PUT ${v}%</div></div>
     <div style="margin-top:6px"><b>${tag}</b></div>
-    <div>${p.version === 'v2' ? `Regra v2 · prob. final <b>${(p.p * 100).toFixed(1)}%</b> ${p.direction} · VE ${p.ev != null ? (p.ev * 100).toFixed(1) + '%' : '—'} · ${p.approved ? '<b>APROVADA</b>' : 'não aprovada'}` : 'Regra v1 (rode o backtest v2)'}</div>
+    <div>${p.version === 'v2' ? `Regra v2 · prob. final <b>${(p.p * 100).toFixed(1)}%</b> ${p.direction} · VE ${p.ev != null ? (p.ev * 100).toFixed(1) + '%' : '—'} · ${p.approved ? '<b>APROVADA</b>' : 'não aprovada'}` : (p.version === 'v1' ? 'Regra v1 (rode o backtest v2)' : '')}</div>
     ${p.catalog ? `<div>Catálogo: <b>${esc(p.catalog.status)}</b>${p.catalog.best ? ` · ${esc(p.catalog.best.regra)} (${(p.catalog.best.acertoTeste * 100).toFixed(0)}% em ${p.catalog.best.casos})` : ''}</div>` : ''}
     <div>${p.n} casos semelhantes · nível: ${esc(p.level)} · IC95% ${(p.lo * 100).toFixed(1)}–${(p.hi * 100).toFixed(1)}%</div>
     ${p.stage === 'AGUARDAR' ? `<div>Motivo: ${esc(p.reason || '')}</div>` : ''}
@@ -581,7 +594,7 @@ function notifyUser(n) {
 async function loadSignals() {
   try {
     const r = await (await fetch('/api/signals')).json(), st = r.stats;
-    $('#sigStat').textContent = `${st.avaliados} · ${st.favoraveis}${st.taxa != null ? ' (' + Math.round(st.taxa * 100) + '%)' : ''} de ${st.total}${st.bloqueados && st.bloqueados.avaliados ? ` · bloqueados: ${st.bloqueados.favoraveisSeOperasse}/${st.bloqueados.avaliados} teriam dado certo` : ''}`;
+    $('#sigStat').textContent = `${st.avaliados} · ${st.favoraveis}${st.taxa != null ? ' (' + Math.round(st.taxa * 100) + '%)' : ''} de ${st.total}${st.bloqueados && st.bloqueados.avaliados ? ` · bloqueados: ${st.bloqueados.favoraveisSeOperasse}/${st.bloqueados.avaliados} teriam dado certo` : ''}${st.sombra && st.sombra.avaliados ? ` · teste ao vivo (não aprovadas): ${st.sombra.favoraveis}/${st.sombra.avaliados} (${Math.round(st.sombra.taxa * 100)}%)` : ''}`;
     $('#sigList').innerHTML = r.signals.slice(-30).reverse().map(x => `<div>${new Date(x.createdAt).toLocaleTimeString('pt-BR')} ${x.direction} ${esc(x.symbol)} ${x.tf}/exp ${x.expiryMin}m · ${x.status}${x.outcome ? ' · ' + x.outcome : ''}${x.invalidReason ? ' · ' + esc(x.invalidReason) : ''}${x.status === 'bloqueado' && x.reason ? ' · ' + esc(x.reason) : ''}</div>`).join('') || '<div>Nenhum sinal ainda.</div>';
   } catch {}
 }

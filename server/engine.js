@@ -84,7 +84,8 @@ class Engine extends EventEmitter {
       dataState: this.dataState, blockReason: this.blockReason,
       dataAgeMs: this.lastTickAt ? Date.now() - this.lastTickAt : null,
       lastPrice: this.candles.length ? this.candles[this.candles.length - 1].close : null,
-      perf: { tickMsAvg: this.perf.tickMsAvg == null ? null : +this.perf.tickMsAvg.toFixed(2), tickMsMax: +this.perf.tickMsMax.toFixed(1), loopLagP99Ms: this.perf.loopLagP99Ms },
+      allowedExpiries: research.contractRules(this.symbol).expiries,
+      perf: { tickMsAvg: this.perf.tickMsAvg == null ? null : +this.perf.tickMsAvg.toFixed(2), tickMsMax: +Math.max(this.perf.tickMsMax, this.perf.tickMsMaxPrev || 0).toFixed(2), loopLagP99Ms: this.perf.loopLagP99Ms },
       levels: this.levels || null, analysis: this.analysis || null, position: this.position, expiries: EXPIRIES, tfs: Object.keys(GRANS), prob: this.prob, tickLatencyMs: this.tickLatencyMs,
       model: this.model && { name: this.model.model, horizon: this.model.horizon, samples: this.model.samples, ties: this.model.ties, from: this.model.from, to: this.model.to },
       open: this.open && this._openView(),
@@ -164,12 +165,14 @@ class Engine extends EventEmitter {
   }
 
   signalStats() {
-    const done = this.signals.filter(s => s.status !== 'bloqueado' && ['favorável', 'desfavorável', 'empate'].includes(s.outcome));
+    const done = this.signals.filter(s => s.status !== 'bloqueado' && s.status !== 'sombra' && ['favorável', 'desfavorável', 'empate'].includes(s.outcome));
     const fav = done.filter(s => s.outcome === 'favorável').length;
     const blocked = this.signals.filter(s => s.status === 'bloqueado' && ['favorável', 'desfavorável', 'empate'].includes(s.outcome));
+    const sh = this.signals.filter(s => s.status === 'sombra' && ['favorável', 'desfavorável', 'empate'].includes(s.outcome));
+    const shFav = sh.filter(s => s.outcome === 'favorável').length;
     const byCat = {};
     for (const s of done) { const k = (s.catalog && s.catalog.status) || 'sem dado'; const b = byCat[k] = byCat[k] || { n: 0, favoraveis: 0 }; b.n++; if (s.outcome === 'favorável') b.favoraveis++; }
-    return { bloqueados: { avaliados: blocked.length, favoraveisSeOperasse: blocked.filter(s => s.outcome === 'favorável').length }, porCatalogo: byCat, total: this.signals.length, avaliados: done.length, favoraveis: fav, taxa: done.length ? fav / done.length : null,
+    return { sombra: { avaliados: sh.length, favoraveis: shFav, taxa: sh.length ? shFav / sh.length : null, desde: (this.signals.find(s => s.status === 'sombra') || {}).createdAt || null }, bloqueados: { avaliados: blocked.length, favoraveisSeOperasse: blocked.filter(s => s.outcome === 'favorável').length }, porCatalogo: byCat, total: this.signals.length, avaliados: done.length, favoraveis: fav, taxa: done.length ? fav / done.length : null,
       invalidados: this.signals.filter(s => s.status === 'invalidado').length };
   }
 
@@ -346,6 +349,8 @@ class Engine extends EventEmitter {
     if (symbol) this.symbol = symbol;
     if (tf && !GRANS[tf]) throw new Error('timeframe inválido');
     if (tf) this.tf = tf;
+    const ok = research.contractRules(this.symbol).expiries;          // ex.: forex só aceita 15 min na Deriv
+    if (!ok.includes(this.cfg.expiryMin)) { this.cfg.expiryMin = ok[0]; this.log(`Expiração ajustada para ${ok[0]} min (mínimo da Deriv neste mercado)`, 'warn'); }
     await this.subscribeCandles();
   }
 
@@ -621,6 +626,7 @@ class Engine extends EventEmitter {
 
   setConfig(c) {
     if (c.expiryMin != null && !EXPIRIES.includes(Number(c.expiryMin))) throw new Error('expiração inválida (5 ou 15 min)');
+    if (c.expiryMin != null && !research.contractRules(this.symbol).expiries.includes(Number(c.expiryMin))) throw new Error(`a Deriv não oferece ${c.expiryMin} min neste mercado (permitido: ${research.contractRules(this.symbol).expiries.join(', ')} min)`);
     if (c.maxDataAgeSec != null && !(Number(c.maxDataAgeSec) >= 3 && Number(c.maxDataAgeSec) <= 300)) throw new Error('idade máxima do dado entre 3 e 300 s');
     if (c.minProb != null && !(Number(c.minProb) >= 0.5 && Number(c.minProb) <= 0.95)) throw new Error('probabilidade mínima entre 50% e 95%');
     if (c.minSamples != null && !(Number(c.minSamples) >= 10)) throw new Error('amostra mínima ≥ 10');

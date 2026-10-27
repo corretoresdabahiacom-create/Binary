@@ -187,6 +187,15 @@ class Scanner extends EventEmitter {
           version: pass.version, reason: pass.reason, blocks: pass.blocks, analysis: pass.analysis, candleOpen: newCandle.epoch, expiresAt: newCandle.epoch, price: newCandle.open };
         this.pending.push(bs); this.record(bs);
       }
+      if (!pass.ok && /não aprovada/.test(pass.reason || '')) {      // teste ao vivo das combinações reprovadas: registra, nunca avisa
+        const sh = research.liveDecision(st.candles, i, e, { symbol: st.sym, tf: st.tf, expiryMin: +exp }, { ...cfg, allowUnapproved: 1 }, this.fresh(st));
+        if (sh.ok) {
+          const ss = { uid: `${newCandle.epoch}-${st.sym}-${st.tf}-${sh.direction}-x${exp}-s`, status: 'sombra', stage: 'sombra', origin: 'scanner',
+            symbol: st.sym, tf: st.tf, expiryMin: +exp, strategy: e.model, createdAt: Date.now(), direction: sh.direction, confidence: sh.p, ev: sh.ev,
+            version: sh.version, reason: 'não aprovada (teste ao vivo)', analysis: sh.analysis, candleOpen: newCandle.epoch, expiresAt: newCandle.epoch, price: newCandle.open };
+          this.pending.push(ss); this.record(ss);
+        }
+      }
       if (!pass.ok || this.isActive(st.sym, st.tf, +exp)) continue; // combinação aberta no painel: o painel confirma e registra
       const sig = { uid: `${newCandle.epoch}-${st.sym}-${st.tf}-${pass.direction}-x${exp}`, status: 'valido', stage: 'confirmado', origin: 'scanner',
         symbol: st.sym, tf: st.tf, expiryMin: +exp, strategy: e.model, source: 'Deriv API oficial (scanner)', createdAt: Date.now(),
@@ -208,7 +217,7 @@ class Scanner extends EventEmitter {
       if (!cc) return !(st.hist.length && st.hist.at(-1).epoch >= end); // aguardando; descarta se houve lacuna
       const d = cc.close - s.price;
       s.outcome = d === 0 ? 'empate' : (d > 0) === (s.direction === 'CALL') ? 'favorável' : 'desfavorável';
-      s.exitPrice = cc.close; if (s.status !== 'bloqueado') s.status = 'expirado'; this.record(s);
+      s.exitPrice = cc.close; if (s.status !== 'bloqueado' && s.status !== 'sombra') s.status = 'expirado'; this.record(s);
       return false;
     });
   }

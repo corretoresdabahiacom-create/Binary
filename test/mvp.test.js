@@ -132,7 +132,7 @@ test('probabilidade: expiração não múltipla do gráfico → modelo indispon�
   const { e } = await engineWithMock();
   try {
     await e.startPublic();
-    await e.setMarket(null, '15m');
+    await e.setMarket('R_100', '15m');                  // sintético: aceita 5 min; forex não
     e.setConfig({ expiryMin: 5 });
     assert.strictEqual(e.model, null);
     assert.match(e.prob.reason, /não é múltipla/);
@@ -202,5 +202,18 @@ test('acompanhamento: MANTER a favor; ABANDONAR quando vira contra e o modelo in
     e.position.expiresAt = e.now() - 1; e._watchPosition(true);
     assert.strictEqual(e.position, null);
     assert.ok(notes.some(n => n.kind === 'fim' && /desfavorável/.test(n.text)));
+  } finally { done(e); }
+});
+
+test('expiração inválida para o mercado é ajustada (forex só 15 min) e recusada na configuração', async () => {
+  const { e } = await engineWithMock();
+  try {
+    await e.startPublic();
+    await e.setMarket('R_100', '5m'); e.setConfig({ expiryMin: 5 });
+    assert.strictEqual(e.cfg.expiryMin, 5);
+    await e.setMarket('frxEURUSD', '5m');
+    assert.strictEqual(e.cfg.expiryMin, 15, 'ajustou para o mínimo da Deriv');
+    assert.throws(() => e.setConfig({ expiryMin: 5 }), /não oferece 5 min/);
+    assert.deepStrictEqual(e.publicState().allowedExpiries, [15]);
   } finally { done(e); }
 });

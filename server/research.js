@@ -172,6 +172,7 @@ function tradeable(sym, epoch) {
 // Regra ao vivo: v2 (calibração + meta + VE + aprovação) quando há data/research.json; senão a regra v1.
 function liveDecision(candles, i, est, combo, cfg, fresh) {
   const d = baseDecision(candles, i, est, combo, cfg, fresh);
+  if (!d.version) d.version = loadResearch() ? 'v2' : 'v1';   // a versão da regra vale mesmo quando para antes (ex.: expiração inválida)
   if (!d.ok || cfg.analise === 0) return d;
   // bloqueios do motor de análise (velas fechadas até i; na vela em formação o resultado é instável/preliminar)
   const gran = i > 0 ? candles[i].epoch - candles[i - 1].epoch : null;

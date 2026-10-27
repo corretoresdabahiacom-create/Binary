@@ -75,3 +75,21 @@ test('modelo incremental = modelo reconstruído (mesmas contagens)', () => {
   const a = inc.table.get('base'), b = full.table.get('base');
   assert.ok(Math.abs(a.up / a.n - b.up / b.n) < 0.01);
 });
+
+test('scanner: combinação não aprovada gera registro "sombra" (teste ao vivo) sem aviso', () => {
+  const R = require('../server/research');
+  R.saveResearch({ combos: { 'frxGBPUSD|5m|15': { approved: false, iso: null, meta: null, payout: 0.95 } } });
+  try {
+    const recs = new Map(), opps = [];
+    const sc = new Scanner({ getCfg: () => cfg, symbols: ['frxGBPUSD'], tfs: ['5m'], record: s => recs.set(s.uid, { ...s }) });
+    sc.on('opportunity', o => opps.push(o));
+    const st = ready(sc, 'frxGBPUSD', '5m', 300);
+    const last = st.candles.at(-1);
+    sc._onOhlc({ symbol: 'frxGBPUSD', granularity: 300, open_time: last.epoch + 300, open: last.close, high: last.close, low: last.close, close: last.close });
+    const sh = [...recs.values()].filter(r => r.status === 'sombra');
+    assert.strictEqual(sh.length, 1); assert.strictEqual(opps.filter(o => o.stage === 'confirmado').length, 0, 'não avisa');
+    for (let k = 0; k < 3; k++) { const c2 = st.candles.at(-1); sc._onOhlc({ symbol: 'frxGBPUSD', granularity: 300, open_time: c2.epoch + 300, open: c2.close + 1, high: c2.close + 1, low: c2.close + 1, close: c2.close + 1 }); }
+    const r = [...recs.values()].find(x => x.status === 'sombra');
+    assert.ok(r.outcome, 'resultado avaliado'); assert.strictEqual(r.status, 'sombra', 'continua marcado como sombra');
+  } finally { require('fs').unlinkSync(R.RESEARCH_FILE()); }
+});
