@@ -104,3 +104,17 @@ test('multiplicadores: no ruído o resultado médio fica perto de −comissão (
   assert.ok(Math.abs(r.modelo.mediaPorOp + 0.01) < 0.03, `média ${r.modelo.mediaPorOp}`);
   assert.ok(r.modelo.pValue > 0.05);
 });
+
+test('barreira "1 dia" fiel à Deriv: janela da hora H até o fim do dia seguinte', () => {
+  const { barrierEventsHourly } = require('../server/backtest2');
+  const t0 = Date.UTC(2026, 0, 5) / 1000;                       // segunda-feira 00:00 UTC
+  const hc = Array.from({ length: 24 * 40 }, (_, i) => ({ epoch: t0 + i * 3600, open: 100, high: 100.5, low: 99.5, close: 100 }));
+  // pico às 20h do dia seguinte à compra (dentro da janela) e às 01h de d+2 (fora)
+  const d = 20, buy = t0 + d * 86400 + 10 * 3600;
+  hc.find(c => c.epoch === t0 + (d + 1) * 86400 + 20 * 3600).high = 110;
+  hc.find(c => c.epoch === t0 + (d + 2) * 86400 + 1 * 3600).low = 90;
+  const { ev } = barrierEventsHourly(hc, 1.5, 10);
+  const idx = Math.floor((buy - t0) / 86400) - 15;              // posição do dia d nos eventos (a partir do dia 15)
+  assert.strictEqual(ev.ONETOUCH_alta[idx], true, 'toque no dia seguinte conta');
+  assert.strictEqual(ev.ONETOUCH_baixa[idx], false, 'toque depois do fim do dia seguinte não conta');
+});

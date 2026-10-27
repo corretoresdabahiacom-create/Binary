@@ -9,7 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const deriv = require('../server/deriv');
 const { fetchHistory } = require('../server/catalog');
-const { evaluateCombo, approve, evaluateMultiplier, barrierEvents } = require('../server/backtest2');
+const { evaluateCombo, approve, evaluateMultiplier, barrierEventsHourly } = require('../server/backtest2');
 const R = require('../server/research');
 const { atr } = require('../server/indicators');
 
@@ -66,20 +66,20 @@ async function riseFall(sock) {
 }
 
 async function barriers(sock) {
-  console.log('\n=== 2) CONTRATOS COM BARREIRA (1 dia): preço da Deriv × frequência histórica ===');
+  console.log('\n=== 2) CONTRATOS COM BARREIRA ("1 dia" = até o fim do dia seguinte): preço da Deriv × frequência histórica ===');
   const syms = ['frxEURUSD', 'frxGBPUSD', 'frxUSDJPY', 'frxAUDJPY', 'frxXAUUSD', 'frxXAGUSD'];
   const rows = [];
   for (const sym of syms) {
-    let c; try { c = await hist(sock, sym, 86400, 5000); } catch (e) { console.log(`${nm(sym)} PULADO: ${e.message}`); continue; }
-    if (c.length < 200) { console.log(`${nm(sym)} PULADO: só ${c.length} dias`); continue; }   // a Deriv só fornece ~1 ano de velas diárias
-    const A = atr(c, 14).at(-1);
-    let spot, dec;
-    try { const p = await proposal(sock, { contract_type: 'CALL', underlying_symbol: sym, duration: 1, duration_unit: 'd' }); spot = +p.spot; dec = (String(p.spot).split('.')[1] || '').length; }
+    let c; try { c = await hist(sock, sym, 3600, 10000); } catch (e) { console.log(`${nm(sym)} PULADO: ${e.message}`); continue; }
+    const H = new Date().getUTCHours();                       // compra simulada na mesma hora UTC de agora
+    let spot, dec, horas;
+    try { const p = await proposal(sock, { contract_type: 'CALL', underlying_symbol: sym, duration: 1, duration_unit: 'd' }); spot = +p.spot; dec = (String(p.spot).split('.')[1] || '').length; horas = (p.date_expiry - p.date_start) / 3600; }
     catch (e) { console.log(`${nm(sym)} PULADO: ${e.message}`); continue; }
     const f = x => x.toFixed(dec);
-    console.log(`${nm(sym)} ${c.length} dias de histórico · ATR diário ${f(A)}`);
+    const A = barrierEventsHourly(c, 0, H).atrHoje;
+    console.log(`${nm(sym)} ${c.length} velas de 1 h · compra às ${H}h UTC · contrato dura ${horas.toFixed(1)} h · ATR diário ${f(A)}`);
     for (const k of [0, 0.5, 1, 1.5]) {
-      const ev = barrierEvents(c, k), up = f(spot + k * A), dn = f(spot - k * A);
+      const ev = barrierEventsHourly(c, k, H).ev, up = f(spot + k * A), dn = f(spot - k * A);
       const specs = k === 0
         ? [['HIGHER', { contract_type: 'CALL' }], ['LOWER', { contract_type: 'PUT' }]]
         : [['ONETOUCH_alta', { contract_type: 'ONETOUCH', barrier: up }], ['ONETOUCH_baixa', { contract_type: 'ONETOUCH', barrier: dn }],

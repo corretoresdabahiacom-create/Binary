@@ -153,4 +153,31 @@ function barrierEvents(c, k) {
   return ev;
 }
 
-module.exports = { evaluateCombo, approve, trainArtifacts, evaluateMultiplier, barrierEvents };
+// Versão fiel ao contrato "1 dia" da Deriv: comprado na hora H (UTC) do dia d, termina às 23:59:59 UTC do
+// dia d+1 (verificado na proposta: date_expiry). Usa velas de 1 h; ATR diário montado das velas horárias até d−1.
+function barrierEventsHourly(hc, k, entryHour) {
+  const day = e => Math.floor(e / 86400), days = new Map();
+  for (const c of hc) { const d = day(c.epoch); const x = days.get(d); if (!x) days.set(d, { epoch: d * 86400, open: c.open, high: c.high, low: c.low, close: c.close }); else { x.high = Math.max(x.high, c.high); x.low = Math.min(x.low, c.low); x.close = c.close; } }
+  const dl = [...days.values()].sort((a, b) => a.epoch - b.epoch), di = new Map(dl.map((d, i) => [day(d.epoch), i]));
+  const { atr } = require('./indicators'); const A = atr(dl, 14);
+  const ev = { ONETOUCH_alta: [], ONETOUCH_baixa: [], NOTOUCH_alta: [], NOTOUCH_baixa: [], HIGHER: [], LOWER: [], EXPIRYRANGE: [], EXPIRYMISS: [], RANGE: [], UPORDOWN: [] };
+  for (let i = 0; i < hc.length; i++) {
+    const c = hc[i]; if (new Date(c.epoch * 1000).getUTCHours() !== entryHour) continue;
+    const d = day(c.epoch), ix = di.get(d); if (ix == null || ix < 15) continue;
+    const a = A[ix - 1]; if (!a) continue;
+    const end = (d + 2) * 86400;                                  // 00:00 de d+2 = fim de d+1
+    let hi = -Infinity, lo = Infinity, cl = null, j = i;
+    for (; j < hc.length && hc[j].epoch < end; j++) { hi = Math.max(hi, hc[j].high); lo = Math.min(lo, hc[j].low); cl = hc[j].close; }
+    if (j >= hc.length) break;                                    // janela ainda não terminou
+    if (!days.has(d + 1)) continue;                               // dia seguinte sem negociação (fim de semana)
+    const o = c.open, up = o + k * a, dn = o - k * a;
+    ev.ONETOUCH_alta.push(hi >= up); ev.NOTOUCH_alta.push(hi < up);
+    ev.ONETOUCH_baixa.push(lo <= dn); ev.NOTOUCH_baixa.push(lo > dn);
+    ev.HIGHER.push(cl > up); ev.LOWER.push(cl < dn);
+    ev.EXPIRYRANGE.push(cl > dn && cl < up); ev.EXPIRYMISS.push(cl >= up || cl <= dn);
+    ev.RANGE.push(hi < up && lo > dn); ev.UPORDOWN.push(hi >= up || lo <= dn);
+  }
+  return { ev, atrHoje: A.at(-1) };
+}
+
+module.exports = { evaluateCombo, approve, trainArtifacts, evaluateMultiplier, barrierEvents, barrierEventsHourly };
