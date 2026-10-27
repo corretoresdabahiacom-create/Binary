@@ -98,7 +98,7 @@ details summary{cursor:pointer;color:var(--mute);font-size:12px;text-transform:u
   body[data-tab="sinal"] [data-sec="sinal"], body[data-tab="scanner"] [data-sec="scanner"], body[data-tab="analise"] [data-sec="analise"],
   body[data-tab="dados"] [data-sec="dados"], body[data-tab="ajustes"] [data-sec="ajustes"]{display:block}
   #colL,#colR{display:contents}
-  .bar{gap:6px;margin-bottom:6px} .bar select{padding:6px 8px} .seg button{padding:6px 10px} #clock{display:none}
+  .bar{gap:6px;margin-bottom:6px} .bar select{padding:6px 8px} .seg button{padding:6px 10px} #clock{display:none} #bestTag{order:9;flex-basis:100%;text-align:center}
   .big{padding:8px 10px;margin:0;border-width:2px;border-radius:10px}
   .big .t{font-size:26px} .big .p{font-size:15px;margin-top:2px} .big .s{font-size:12px;margin-top:3px} .big .cd{font-size:20px;margin-top:2px}
   #mtabs{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:15;background:var(--panel);border-top:1px solid var(--line);padding:4px 4px calc(4px + env(safe-area-inset-bottom))}
@@ -151,6 +151,7 @@ details summary{cursor:pointer;color:var(--mute);font-size:12px;text-transform:u
           </select>
           <div class="seg" id="tf"><button data-tf="15m" class="on">15 min</button><button data-tf="1h">1 hora</button></div>
           <span class="sp"></span>
+          <span class="tag" id="bestTag" title="Melhor par pelo backtest (pior caso do acerto − empate)" style="cursor:pointer">melhor par —</span>
           <span class="tag" id="cdown" title="Tempo até o fechamento da vela atual">fecha em —</span>
           <span class="tag" id="clock">—</span>
         </div>
@@ -355,6 +356,7 @@ new ResizeObserver(() => chart.applyOptions({ width: $('#chart').clientWidth, he
 let priceLine = null;
 
 let srLines = [], histMarks = [], posLines = [], precision = 5;
+const fp = v => (v == null ? '—' : (+v).toFixed(precision));
 function setPrecision(cs) {
   const dec = v => { const t = String(v); const k = t.indexOf('.'); return k < 0 ? 0 : t.length - k - 1; };
   let d = 0; for (const c of cs.slice(-60)) d = Math.max(d, dec(c.open), dec(c.high), dec(c.low), dec(c.close));
@@ -394,7 +396,7 @@ function drawMarkers() {
   const mine = S ? positions.filter(p => p.symbol === S.symbol) : [];
   for (const p of mine) {
     const g = ({ '15m': 900, '1h': 3600 })[S.tf] || 900, t = Math.floor(p.entryAt / g) * g, up = p.direction === 'CALL';
-    if (known.has(t)) m.push({ time: t, position: up ? 'belowBar' : 'aboveBar', color: '#ffd666', shape: up ? 'arrowUp' : 'arrowDown', text: (up ? 'CALL' : 'PUT') + ' ' + p.entryPrice });
+    if (known.has(t)) m.push({ time: t, position: up ? 'belowBar' : 'aboveBar', color: '#ffd666', shape: up ? 'arrowUp' : 'arrowDown', text: (up ? 'CALL' : 'PUT') + ' ' + fp(p.entryPrice) });
   }
   m.sort((a, b) => a.time - b.time);
   series.setMarkers(m);
@@ -508,7 +510,7 @@ function renderPos() {
       return `<div style="margin-top:8px;padding:8px;border-radius:8px;border:2px solid ${ab ? '#ef5350' : fav ? '#26a69a' : '#3a4456'}">
         <div style="display:flex;justify-content:space-between;gap:6px"><b style="color:${ab ? '#ef5350' : fav ? '#26a69a' : 'var(--text)'}">${ab ? '✕ ABANDONAR' : '✓ MANTER'} · ${p.direction} ${esc(p.name || p.symbol)}</b>
         <button class="btn ghost" data-clr="${p.id}" style="width:auto;padding:2px 8px">×</button></div>
-        <div class="hint" style="margin:2px 0 0">entrada ${p.entryPrice} · agora ${p.price ?? '—'} · ${p.tf} · exp. ${p.expiryMin} min · termina em <b>${mmss(left)}</b></div>
+        <div class="hint" style="margin:2px 0 0">entrada ${fp(p.entryPrice)} · agora ${fp(p.price)} · ${p.tf} · exp. ${p.expiryMin} min · termina em <b>${mmss(left)}</b></div>
         <div class="hint" style="margin:2px 0 0">${esc(p.reason || '')}</div></div>`; }).join('')}
     <div class="hint">Regra de abandono não comprovada em backtest; o valor de venda antecipada é o que a Deriv oferecer.</div></div>`;
   el.querySelectorAll('[data-clr]').forEach(b => b.onclick = () => call('position_clear', { id: b.dataset.clr }).catch(() => {}));
@@ -602,6 +604,8 @@ async function loadBest() {
       ${b.historico.map(linha).join('')}
       ${g ? `<div class="hint" style="margin-top:8px">Mais forte agora: <b>${esc(g.name)}</b> ${TFL[g.tf]} · exp. ${g.expiryMin} · ${g.direction} ${pct(g.p)} — ${g.ok ? 'sinal liberado' : esc(g.reason || 'AGUARDAR')}</div>` : ''}
       <div class="hint">Critério: pior caso do acerto (IC95%) menos o empate do payout real. Abaixo de zero = sem vantagem.</div>`;
+    $('#bestTag').textContent = h ? `melhor: ${h.name} ${TFL[h.tf]} · exp ${h.expiryMin}${h.folga > 0 ? ' ✓' : ' (sem vantagem)'}` : 'melhor par —';
+    $('#bestTag').style.color = h && h.folga > 0 ? 'var(--up)' : ''; $('#bestTag').onclick = () => h && gotoOpp(h);
     $('#bestBox').querySelectorAll('[data-go]').forEach(x => x.onclick = () => gotoOpp(b.historico[+x.dataset.go]));
   } catch {}
 }
