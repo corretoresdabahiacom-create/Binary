@@ -40,6 +40,25 @@ app.get('/api/research', (req, res) => {
   res.json({ generatedAt: r.generatedAt, method: r.method, aggregate: r.aggregate, running: !!researchJob,
     combos: Object.fromEntries(Object.entries(r.combos).map(([k, c]) => [k, { approved: c.approved, payout: c.payout, payoutSource: c.payoutSource, v1: c.v1, v2: c.v2, calibration: c.calibration, v1PorSessao: c.v1PorSessao, metaPesos: c.meta && Object.fromEntries(research.FEATURE_NAMES.map((n, j) => [n, +c.meta.w[j].toFixed(3)])) }])) });
 });
+// Melhor par: limite inferior (Wilson 95%) do acerto fora da amostra − empate do payout real. Conservador de propósito.
+const { wilson } = require('./probability');
+function bestPairs() {
+  const r = research.loadResearch(), out = { historico: [], agora: [], aprovadas: [], geradoEm: r && r.generatedAt };
+  if (r) for (const [k, c] of Object.entries(r.combos)) {
+    const [sym, tf, exp] = k.split('|'); if (!/^frx/.test(sym) || !['15m', '1h'].includes(tf)) continue;
+    const v = c.v3 && c.v3.n >= 20 ? c.v3 : c.v2; if (!v || !v.n) continue;
+    const be = 1 / (1 + (c.payout || 0.95)), lo = wilson(v.wins, v.n)[0];
+    const sh = engine.signals.filter(x => x.status === 'sombra' && x.symbol === sym && x.tf === tf && x.expiryMin === +exp && ['favorável', 'desfavorável'].includes(x.outcome));
+    out.historico.push({ symbol: sym, name: NAMES[sym] || sym, tf, expiryMin: +exp, n: v.n, acerto: v.wins / v.n, limiteInferior: lo, empate: be, folga: lo - be, aprovada: !!c.approved,
+      aoVivo: { n: sh.length, acerto: sh.length ? sh.filter(x => x.outcome === 'favorável').length / sh.length : null } });
+    if (c.approved) out.aprovadas.push(k);
+  }
+  out.historico.sort((a, b) => b.folga - a.folga); out.historico = out.historico.slice(0, 5);
+  if (scanner) out.agora = scanner.view().filter(x => x.fresh && x.p != null).sort((a, b) => b.p - a.p).slice(0, 3)
+    .map(x => ({ symbol: x.symbol, name: x.name, tf: x.tf, expiryMin: x.expiryMin, direction: x.direction, p: x.p, ok: x.ok, approved: x.approved, reason: x.reason }));
+  return out;
+}
+app.get('/api/best', (req, res) => res.json(bestPairs()));
 app.get('/api/scan', (req, res) => res.json(scanner ? scanner.view() : []));
 app.get('/api/status', (req, res) => res.json(engine.publicState()));
 const server = http.createServer(app);
@@ -58,7 +77,7 @@ const wss = new WebSocketServer({
 const clients = new Set();
 const bcast = (type, data) => { const s = JSON.stringify({ type, data }); for (const c of clients) if (c.readyState === 1) c.send(s); };
 
-for (const ev of ['state', 'candles', 'candle', 'signal', 'trade_open', 'trade_update', 'trade_closed', 'log', 'alert', 'catalog_progress', 'catalog', 'notify', 'prob', 'position'])
+for (const ev of ['state', 'candles', 'candle', 'signal', 'trade_open', 'trade_update', 'trade_closed', 'log', 'alert', 'catalog_progress', 'catalog', 'notify', 'prob', 'positions'])
   engine.on(ev, d => bcast(ev, d));
 engine.on('trade_closed', () => bcast('diagnostics', engine.diagnostics()));
 if (scanner) {
@@ -66,6 +85,7 @@ if (scanner) {
   scanner.on('log', m => engine.log(m, 'warn'));
   scanner.on('catalog', c => engine.log(`Catálogo ${NAMES[c.sym] || c.sym} ${c.tf}: regras validadas ${JSON.stringify(c.validated)}`));
   engine.catalogCheck = (...a) => scanner.agreement(...a);
+  engine.priceOf = sym => { const st = scanner.streams.get(`${sym}|15m`); const c = st && st.candles.at(-1); return c ? c.close : null; };
   setInterval(() => { if (clients.size) bcast('scan', scanner.view()); }, 2000).unref();
 }
 
@@ -102,7 +122,7 @@ const handlers = {
     await engine.selectAccount(d.id);
   },
   async entered(d) { engine.markEntry(d.direction); },
-  async position_clear() { engine.clearPosition(); },
+  async position_clear(d) { engine.clearPosition(d && d.id); },
   async market(d) { await engine.setMarket(d.symbol, d.tf); },
   // Vai para a oportunidade indicada pelo scanner: ativo + gráfico + expiração.
   async goto(d) {

@@ -159,7 +159,7 @@ function saveResearch(obj) { fs.mkdirSync(DATA_DIR(), { recursive: true }); fs.w
 // duração e sem negociação entre 20:50 e 22:00 UTC. Sinais fora disso não são operáveis.
 const isForex = sym => /^frx/.test(sym);
 const clock = { now: () => Date.now() / 1000 };            // injetável nos testes
-function contractRules(sym) { return { expiries: isForex(sym) ? [15] : [5, 15] }; }
+function contractRules(sym) { return { expiries: [15, 60] }; }   // gráficos de 15 min e 1 h; forex não aceita < 15 min
 // Expirações intradiárias de Rise/Fall oferecidas pela Deriv (contracts_for, out/2026), usadas na pesquisa.
 const isMetal = sym => /^frxX(AU|AG)USD$/.test(sym);
 function researchExpiries(sym) { return isMetal(sym) ? [5, 15, 60] : /^OTC_/.test(sym) ? [15, 60] : isForex(sym) ? [15, 60] : [5, 15]; }

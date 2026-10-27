@@ -149,7 +149,7 @@ details summary{cursor:pointer;color:var(--mute);font-size:12px;text-transform:u
           <select id="symbol">
             <option value="frxEURUSD">EUR/USD</option><option value="frxGBPUSD">GBP/USD</option><option value="frxUSDJPY">USD/JPY</option><option value="frxAUDUSD">AUD/USD</option><option value="frxUSDCAD">USD/CAD</option><option value="frxUSDCHF">USD/CHF</option><option value="frxNZDUSD">NZD/USD</option><option value="frxEURGBP">EUR/GBP</option><option value="frxEURJPY">EUR/JPY</option><option value="frxGBPJPY">GBP/JPY</option>
           </select>
-          <div class="seg" id="tf"><button data-tf="5m" class="on">5 min</button><button data-tf="15m">15 min</button><button data-tf="1h">1 hora</button></div>
+          <div class="seg" id="tf"><button data-tf="15m" class="on">15 min</button><button data-tf="1h">1 hora</button></div>
           <span class="sp"></span>
           <span class="tag" id="cdown" title="Tempo até o fechamento da vela atual">fecha em —</span>
           <span class="tag" id="clock">—</span>
@@ -174,6 +174,7 @@ details summary{cursor:pointer;color:var(--mute);font-size:12px;text-transform:u
       <div class="card" data-sec="sinal">
         <div class="row" style="gap:8px;margin-bottom:8px"><button class="btn up" id="inCall">Entrei CALL ▲</button><button class="btn down" id="inPut">Entrei PUT ▼</button></div>
         <div id="posBox"></div>
+        <div id="bestBox" class="card" style="margin-bottom:10px;padding:10px"><b>Melhor par</b><div class="hint">Carregando…</div></div>
         <div class="warnbox" id="modeBanner" style="margin-bottom:10px">MODO SÓ ANÁLISE — o app não envia ordens. Você decide e opera manualmente na corretora.</div>
         <h3>Probabilidade ao vivo</h3>
         <div id="prob" class="hint">Carregando histórico da Deriv para o modelo…</div>
@@ -183,7 +184,7 @@ details summary{cursor:pointer;color:var(--mute);font-size:12px;text-transform:u
         </div>
         <h3 style="margin-top:14px">Sinal para a próxima vela</h3>
         <label>Expiração pretendida (independente do timeframe)</label>
-        <div class="seg" id="exp" style="width:100%"><button data-e="5" class="on" style="flex:1">5 min</button><button data-e="15" style="flex:1">15 min</button></div>
+        <div class="seg" id="exp" style="width:100%"><button data-e="15" class="on" style="flex:1">15 min</button><button data-e="60" style="flex:1">60 min</button></div>
         <div class="signal" id="signal"><div class="none">Sem sinal confirmado — AGUARDAR</div></div>
       </div>
 
@@ -351,7 +352,7 @@ const series = chart.addCandlestickSeries({ upColor: '#26a69a', downColor: '#ef5
 new ResizeObserver(() => chart.applyOptions({ width: $('#chart').clientWidth, height: $('#chart').clientHeight })).observe($('#chart'));
 let priceLine = null;
 
-let srLines = [], histMarks = [], posLine = null, precision = 5;
+let srLines = [], histMarks = [], posLines = [], precision = 5;
 function setPrecision(cs) {
   const dec = v => { const t = String(v); const k = t.indexOf('.'); return k < 0 ? 0 : t.length - k - 1; };
   let d = 0; for (const c of cs.slice(-60)) d = Math.max(d, dec(c.open), dec(c.high), dec(c.low), dec(c.close));
@@ -388,15 +389,16 @@ function drawMarkers() {
     const up = open.direction === 'CALL';
     m.push({ time: open.candleOpen, position: 'inBar', color: '#4c8dff', shape: 'circle', text: 'ENTRADA ' + (up ? '▲' : '▼') });
   }
-  if (position && S && position.symbol === S.symbol) {
-    const g = ({ '5m': 300, '15m': 900, '1h': 3600 })[S.tf] || 300, t = Math.floor(position.entryAt / g) * g, up = position.direction === 'CALL';
-    if (known.has(t)) m.push({ time: t, position: up ? 'belowBar' : 'aboveBar', color: '#ffd666', shape: up ? 'arrowUp' : 'arrowDown', text: 'MINHA ENTRADA ' + (up ? 'CALL' : 'PUT') });
+  const mine = S ? positions.filter(p => p.symbol === S.symbol) : [];
+  for (const p of mine) {
+    const g = ({ '15m': 900, '1h': 3600 })[S.tf] || 900, t = Math.floor(p.entryAt / g) * g, up = p.direction === 'CALL';
+    if (known.has(t)) m.push({ time: t, position: up ? 'belowBar' : 'aboveBar', color: '#ffd666', shape: up ? 'arrowUp' : 'arrowDown', text: (up ? 'CALL' : 'PUT') + ' ' + p.entryPrice });
   }
   m.sort((a, b) => a.time - b.time);
   series.setMarkers(m);
-  if (posLine) { series.removePriceLine(posLine); posLine = null; }
-  if (position && S && position.symbol === S.symbol)
-    posLine = series.createPriceLine({ price: position.entryPrice, color: '#ffd666', lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title: 'ENTRADA ' + position.direction });
+  for (const l of posLines) series.removePriceLine(l); posLines = [];
+  mine.forEach((p, k) => posLines.push(series.createPriceLine({ price: p.entryPrice, color: p.status === 'ABANDONAR' ? '#ef5350' : p.direction === 'CALL' ? '#ffd666' : '#ffb84d',
+    lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title: `#${k + 1} ${p.direction}` })));
   if (priceLine) { series.removePriceLine(priceLine); priceLine = null; }
   if (open && open.entrySpot) priceLine = series.createPriceLine({ price: open.entrySpot, color: '#4c8dff', lineWidth: 1, lineStyle: 2, title: 'entrada' });
 }
@@ -438,7 +440,7 @@ const on = {
     if (s.perf) { $('#dProc').textContent = s.perf.tickMsAvg == null ? '—' : `${s.perf.tickMsAvg} / ${s.perf.tickMsMax} ms`; $('#dLag').textContent = s.perf.loopLagP99Ms == null ? '—' : s.perf.loopLagP99Ms + ' ms'; }
     $('#dModel').textContent = s.model ? `${s.model.samples} amostras · ${s.model.horizon} vela(s)` : 'indisponível';
     for (const [id, k, f] of [['minProb', 'minProb', 100], ['minSamples', 'minSamples', 1]]) if (document.activeElement !== $('#' + id)) $('#' + id).value = Math.round(s.cfg[k] * f);
-    { const had = position && position.entryAt; position = s.position; renderPos(); if ((had || null) !== ((position && position.entryAt) || null)) drawMarkers(); }
+    { const k = posKey(); positions = s.positions || []; renderPos(); if (k !== posKey()) drawMarkers(); }
     drawLevels(s.levels); renderAnalysis(); renderFilters();
     if (s.prob) renderProb(s.prob);
     $('#dPrice').textContent = s.lastPrice == null ? '—' : (+s.lastPrice).toFixed(5);
@@ -451,7 +453,7 @@ const on = {
   prob(p) { renderProb(p); },
   opportunity(o) { onOpportunity(o); loadSignals(); },
   scan(l) { renderScan(l); },
-  position(p) { const had = !!position; position = p; renderPos(); renderBig(); if (had !== !!p) drawMarkers(); },
+  positions(ps) { const k = posKey(); positions = ps || []; renderPos(); renderBig(); if (k !== posKey()) drawMarkers(); },
   research() { loadResearch(); },
   notify(n) { notifyUser(n); loadSignals(); },
   signal(s) { signal = s && s.status === 'valido' ? s : null; renderBig(); renderSignal(); drawMarkers(); if (s && s.status === 'valido') toast(`Sinal ${s.direction === 'CALL' ? 'de COMPRA' : 'de VENDA'}${s.confidence != null ? ' · ' + Math.round(s.confidence * 100) + '%' : ''}`, s.direction === 'CALL' ? 'ok' : 'warn'); },
@@ -484,17 +486,22 @@ function renderProb(p) {
     <div>Horizonte: ${p.horizon} vela(s) · estimativa estatística do histórico, não garantia.</div>`;
 }
 let lastProb = null;
-let position = null;
+let positions = [];
+const posKey = () => positions.map(p => p.id + p.status).join('|');
 function renderPos() {
-  const el = $('#posBox'); if (!position) { el.innerHTML = ''; return; }
-  const p = position, left = Math.max(0, Math.round(p.expiresAt - now())), ab = p.status === 'ABANDONAR';
-  el.innerHTML = `<div class="card" style="margin-bottom:10px;border:2px solid ${ab ? '#ef5350' : '#26a69a'}">
-    <div style="font-size:${ab ? 26 : 18}px;font-weight:900;color:${ab ? '#ef5350' : '#26a69a'}">${ab ? '✕ ABANDONAR A OPERAÇÃO' : '✓ MANTER'}</div>
-    <div class="hint">${p.direction} ${esc(p.name || p.symbol)} · entrada ${p.entryPrice} · agora ${p.price} · termina em ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}</div>
-    <div class="hint">${esc(p.reason || '')}</div>
-    <div class="hint">Regra de abandono não comprovada em backtest; o valor de venda antecipada é o que a Deriv oferecer.</div>
-    <button class="btn ghost" id="posClr" style="margin-top:6px">Encerrar acompanhamento</button></div>`;
-  $('#posClr').onclick = () => call('position_clear').catch(() => {});
+  const el = $('#posBox'); if (!positions.length) { el.innerHTML = ''; return; }
+  const mmss = x => `${Math.floor(x / 60)}:${String(x % 60).padStart(2, '0')}`;
+  el.innerHTML = `<div class="card" style="margin-bottom:10px;padding:10px">
+    <div style="display:flex;justify-content:space-between;align-items:center"><b>Minhas entradas (${positions.length})</b>${positions.length > 1 ? '<button class="btn ghost" id="posAll" style="width:auto;padding:4px 10px">Encerrar todas</button>' : ''}</div>
+    ${positions.map(p => { const left = Math.max(0, Math.round(p.expiresAt - now())), ab = p.status === 'ABANDONAR', fav = (p.move || 0) >= 0;
+      return `<div style="margin-top:8px;padding:8px;border-radius:8px;border:2px solid ${ab ? '#ef5350' : fav ? '#26a69a' : '#3a4456'}">
+        <div style="display:flex;justify-content:space-between;gap:6px"><b style="color:${ab ? '#ef5350' : fav ? '#26a69a' : 'var(--text)'}">${ab ? '✕ ABANDONAR' : '✓ MANTER'} · ${p.direction} ${esc(p.name || p.symbol)}</b>
+        <button class="btn ghost" data-clr="${p.id}" style="width:auto;padding:2px 8px">×</button></div>
+        <div class="hint" style="margin:2px 0 0">entrada ${p.entryPrice} · agora ${p.price ?? '—'} · ${p.tf} · exp. ${p.expiryMin} min · termina em <b>${mmss(left)}</b></div>
+        <div class="hint" style="margin:2px 0 0">${esc(p.reason || '')}</div></div>`; }).join('')}
+    <div class="hint">Regra de abandono não comprovada em backtest; o valor de venda antecipada é o que a Deriv oferecer.</div></div>`;
+  el.querySelectorAll('[data-clr]').forEach(b => b.onclick = () => call('position_clear', { id: b.dataset.clr }).catch(() => {}));
+  if ($('#posAll')) $('#posAll').onclick = () => call('position_clear', {}).catch(() => {});
 }
 const REG = { A: 'A · reversão potencial de alta', B: 'B · reversão potencial de baixa', C: 'C · continuação de alta', D: 'D · continuação de baixa', E: 'E · lateral / sem direção', F: 'F · rompimento não confirmado', G: 'G · inadequado para operar' };
 const FL = { integridade: 'Integridade dos dados', historico: 'Histórico mínimo', estendido: 'Movimento estendido', lateral: 'Mercado lateral (ADX baixo)', conflito: 'Conflito com a tendência / rompimento', espaco: 'Pouco espaço até S/R', baixaVol: 'Volatilidade muito baixa' };
@@ -517,12 +524,13 @@ function renderFilters() {
 }
 function renderCountdown() {
   if (!S) return;
-  const g = ({ '5m': 300, '15m': 900, '1h': 3600 })[S.tf] || 300, t = now(), left = Math.max(0, Math.ceil(Math.floor(t / g) * g + g - t));
+  const g = ({ '15m': 900, '1h': 3600 })[S.tf] || 900, t = now(), left = Math.max(0, Math.ceil(Math.floor(t / g) * g + g - t));
   const el = $('#cdown'); el.textContent = `fecha em ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`; el.classList.toggle('soon', left <= 30);
   const w = $('#big .cdw'); if (w) w.textContent = `vela fecha em ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
 }
 function renderBig() {
-  if (position && position.status === 'ABANDONAR') { const b = $('#big'); b.className = 'big put'; b.innerHTML = `<div class="t">ABANDONAR ✕</div><div class="s">${esc(position.direction)} ${esc(position.name || position.symbol)} — ${esc(position.reason)}</div>`; return; }
+  const abd = positions.find(p => p.status === 'ABANDONAR');
+  if (abd) { const b = $('#big'); b.className = 'big put'; b.innerHTML = `<div class="t">ABANDONAR ✕</div><div class="s">${esc(abd.direction)} ${esc(abd.name || abd.symbol)} — ${esc(abd.reason)}</div>`; return; }
   const el = $('#big'), t = now(), mmss = x => { x = Math.max(0, Math.round(x)); return Math.floor(x / 60) + ':' + String(x % 60).padStart(2, '0'); };
   const pct = x => (x * 100).toFixed(1) + '%';
   if (signal && signal.status === 'valido' && t < signal.expiresAt) {
@@ -533,7 +541,7 @@ function renderBig() {
       <div class="cd">${mmss(signal.expiresAt - t)}</div><div class="s">tempo restante para entrar</div>`;
     return;
   }
-  const p = lastProb, g = S ? ({ '5m': 300, '15m': 900, '1h': 3600 })[S.tf] : 300;
+  const p = lastProb, g = S ? ({ '15m': 900, '1h': 3600 })[S.tf] : 900;
   const close = p && p.candle ? p.candle + g : null;
   if (p && p.stage === 'preliminar' && p.pCall != null) {
     el.className = 'big pre';
@@ -545,7 +553,7 @@ function renderBig() {
   const why = !S ? 'conectando…' : S.dataState !== 'ok' ? 'dados ' + S.dataState : (p && p.reason) || 'sem vantagem estatística';
   el.innerHTML = `<div class="t">AGUARDAR</div>${p && p.pCall != null ? `<div class="p">CALL ${pct(p.pCall)} · PUT ${pct(p.pPut)}</div>` : ''}<div class="s">${esc(why)}</div><div class="s cdw"></div>`; renderCountdown();
 }
-const TFL = { '5m': '5 min', '15m': '15 min', '1h': '1 hora' };
+const TFL = { '15m': '15 min', '1h': '1 hora' };
 function oppText(o) { return `${o.name} · gráfico ${TFL[o.tf]} · expiração ${o.expiryMin} min · ${o.direction} ${(o.p * 100).toFixed(1)}%${o.catalog ? ' · catálogo ' + o.catalog : ''}`; }
 function gotoOpp(o) {
   if (!$('#symbol').querySelector(`option[value="${o.symbol}"]`)) { const op = document.createElement('option'); op.value = o.symbol; op.textContent = o.name || o.symbol; $('#symbol').append(op); }
@@ -570,6 +578,21 @@ function renderScan(list) {
       <b>${x.direction === 'CALL' ? 'CALL ▲' : 'PUT ▼'}</b><span><b>${esc(x.name)}</b> · ${TFL[x.tf]} · exp. ${x.expiryMin} min<br><span class="hint">${(x.p * 100).toFixed(1)}% · ${x.n} casos · ${x.stage} · ${x.version === 'v2' ? (x.approved ? 'APROVADA' : 'NÃO aprovada') : 'v1'}${x.catalog ? ' · catálogo ' + esc(x.catalog) : ''}</span></span>
       <button class="btn primary go" data-i="${i}">Ir</button></div>`).join('') : '<div class="hint" style="margin-top:6px">Nenhum mercado com probabilidade suficiente agora — AGUARDAR.</div>';
   $('#scanList').querySelectorAll('.go').forEach(b => b.onclick = () => gotoOpp(ok[+b.dataset.i]));
+}
+async function loadBest() {
+  try {
+    const b = await (await fetch('/api/best')).json(), pct = x => x == null ? '—' : (x * 100).toFixed(1) + '%';
+    const h = b.historico[0], g = b.agora[0];
+    const linha = (x, i) => `<div style="display:flex;align-items:center;gap:8px;margin-top:6px"><span style="min-width:16px">${i + 1}.</span>
+      <span style="flex:1"><b>${esc(x.name)}</b> · ${TFL[x.tf]} · exp. ${x.expiryMin} min<br><span class="hint" style="margin:0">histórico ${pct(x.acerto)} em ${x.n} op · pior caso ${pct(x.limiteInferior)} vs empate ${pct(x.empate)}${x.aoVivo.n ? ` · ao vivo ${pct(x.aoVivo.acerto)} em ${x.aoVivo.n}` : ''}</span></span>
+      <button class="btn ghost" data-go="${i}" style="width:auto;padding:4px 10px">Ir</button></div>`;
+    $('#bestBox').innerHTML = `<div style="display:flex;justify-content:space-between"><b>Melhor par</b><span class="hint" style="margin:0">${b.aprovadas.length ? '<b style="color:var(--up)">' + b.aprovadas.length + ' aprovado(s)</b>' : 'nenhum com vantagem comprovada'}</span></div>
+      ${h ? `<div style="font-size:20px;font-weight:800;margin-top:4px;color:${h.folga > 0 ? 'var(--up)' : 'var(--text)'}">${esc(h.name)} <span style="font-size:13px;font-weight:600">${TFL[h.tf]} · exp. ${h.expiryMin} min</span></div>` : '<div class="hint">Rode o backtest v2 para ranquear os pares.</div>'}
+      ${b.historico.map(linha).join('')}
+      ${g ? `<div class="hint" style="margin-top:8px">Mais forte agora: <b>${esc(g.name)}</b> ${TFL[g.tf]} · exp. ${g.expiryMin} · ${g.direction} ${pct(g.p)} — ${g.ok ? 'sinal liberado' : esc(g.reason || 'AGUARDAR')}</div>` : ''}
+      <div class="hint">Critério: pior caso do acerto (IC95%) menos o empate do payout real. Abaixo de zero = sem vantagem.</div>`;
+    $('#bestBox').querySelectorAll('[data-go]').forEach(x => x.onclick = () => gotoOpp(b.historico[+x.dataset.go]));
+  } catch {}
 }
 async function loadResearch() {
   try {
@@ -722,7 +745,7 @@ $('#cGo').onclick = async () => { $('#cGo').disabled = true; try { await call('c
 $('#cForget').onclick = () => call('forget').then(() => toast('Dados salvos removidos', 'ok')).catch(() => {});
 fetch('/api/trades').then(r => r.json()).then(t => { trades = t; renderTrades(); }).catch(() => {});
 
-setInterval(() => { renderBig(); if (position) renderPos(); renderSignal(); if (open) renderOpen(); if (signal && now() >= signal.expiresAt) drawMarkers(); renderCountdown(); if (ageBase != null) $('#dAge').textContent = ((Date.now() - ageBase) / 1000).toFixed(1) + ' s'; $('#clock').textContent = new Date(now() * 1000).toLocaleTimeString('pt-BR'); }, 1000);
+setInterval(() => { renderBig(); if (positions.length) renderPos(); renderSignal(); if (open) renderOpen(); if (signal && now() >= signal.expiresAt) drawMarkers(); renderCountdown(); if (ageBase != null) $('#dAge').textContent = ((Date.now() - ageBase) / 1000).toFixed(1) + ' s'; $('#clock').textContent = new Date(now() * 1000).toLocaleTimeString('pt-BR'); }, 1000);
 connect();
 document.querySelectorAll('#exp button').forEach(b => b.onclick = () => call('config', { expiryMin: +b.dataset.e }).catch(() => {}));
 $('#minProb').onchange = () => call('config', { minProb: +$('#minProb').value / 100 }).catch(() => {});
@@ -733,7 +756,7 @@ document.addEventListener('click', () => { if ('Notification' in window && Notif
 function setTab(t) { document.body.dataset.tab = t; document.querySelectorAll('#mtabs button').forEach(b => b.classList.toggle('on', b.dataset.t === t)); try { localStorage.setItem('tab', t); } catch {} setTimeout(() => chart.applyOptions({ width: $('#chart').clientWidth, height: $('#chart').clientHeight }), 0); }
 document.querySelectorAll('#mtabs button').forEach(b => b.onclick = () => setTab(b.dataset.t));
 let savedTab = 'sinal'; try { savedTab = localStorage.getItem('tab') || 'sinal'; } catch {} setTab(savedTab);
-loadSignals(); setInterval(() => { loadSignals(); loadHistMarks(); }, 30000); setTimeout(loadHistMarks, 3000); loadResearch(); setInterval(loadResearch, 60000);
+loadSignals(); setInterval(() => { loadSignals(); loadHistMarks(); }, 30000); setTimeout(loadHistMarks, 3000); loadResearch(); setInterval(loadResearch, 60000); loadBest(); setInterval(loadBest, 30000);
 $('#inCall').onclick = () => call('entered', { direction: 'CALL' }).catch(() => {});
 $('#inPut').onclick = () => call('entered', { direction: 'PUT' }).catch(() => {});
 $('#rsRun').onclick = () => call('research_run').then(() => toast('Backtest v2 iniciado — leva alguns minutos', 'ok')).catch(() => {});

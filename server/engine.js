@@ -15,8 +15,8 @@ const nm = sym => NAMES[sym] || sym;
 
 const TRADES_FILE = path.join(process.env.DATA_DIR || path.join(__dirname, '..', 'data'), 'trades.json');
 const SIGNALS_FILE = path.join(process.env.DATA_DIR || path.join(__dirname, '..', 'data'), 'signals.json');
-const GRANS = { '5m': 300, '15m': 900, '1h': 3600 };
-const EXPIRIES = [5, 15];                      // minutos; independente do timeframe
+const GRANS = { '15m': 900, '1h': 3600 };              // gráfico de 5 min removido (pedido do usuário)
+const EXPIRIES = [15, 60];                      // minutos; independente do gráfico                      // minutos; independente do timeframe
 const STRATEGY = 'indicadores-v1';
 const SOURCE = 'Deriv API oficial (WebSocket público)';
 
@@ -29,7 +29,7 @@ class Engine extends EventEmitter {
     this.pub = null;              // socket público (velas)
     this.trade = null;            // socket de negociação da conta ativa
     this.symbol = 'frxEURUSD';
-    this.tf = '5m';
+    this.tf = '15m';
     this.candles = [];
     this.subId = null;
     this.serverOffset = 0;        // segundos (hora Deriv - hora local)
@@ -40,7 +40,9 @@ class Engine extends EventEmitter {
     this.model = null;            // tabela de probabilidade
     this.prob = null;             // estimativa ao vivo
     this.tickLatencyMs = null;
-    this.position = null;
+    this.positions = [];          // entradas MANUAIS marcadas pelo usuário (o app não envia ordens)
+    this._posSeq = 0;
+    this.priceOf = null;          // (símbolo) => último preço (do scanner), para entradas em outros mercados
     this.perf = { tickMsAvg: null, tickMsMax: 0, loopLagP99Ms: null, ticks: 0 };   // desempenho medido (relógio monotônico)
     this.catalogCheck = null;     // (sym, tf, exp, candles, i, dir) => concordância do catalogador (scanner)         // entrada MANUAL marcada pelo usuário (o app não envia ordens)
     this._histKey = null;
@@ -86,7 +88,7 @@ class Engine extends EventEmitter {
       lastPrice: this.candles.length ? this.candles[this.candles.length - 1].close : null,
       allowedExpiries: research.contractRules(this.symbol).expiries,
       perf: { tickMsAvg: this.perf.tickMsAvg == null ? null : +this.perf.tickMsAvg.toFixed(2), tickMsMax: +Math.max(this.perf.tickMsMax, this.perf.tickMsMaxPrev || 0).toFixed(2), loopLagP99Ms: this.perf.loopLagP99Ms },
-      levels: this.levels || null, analysis: this.analysis || null, position: this.position, expiries: EXPIRIES, tfs: Object.keys(GRANS), prob: this.prob, tickLatencyMs: this.tickLatencyMs,
+      levels: this.levels || null, analysis: this.analysis || null, positions: this.positions, expiries: EXPIRIES, tfs: Object.keys(GRANS), prob: this.prob, tickLatencyMs: this.tickLatencyMs,
       model: this.model && { name: this.model.model, horizon: this.model.horizon, samples: this.model.samples, ties: this.model.ties, from: this.model.from, to: this.model.to },
       open: this.open && this._openView(),
       signal: this.signal,
@@ -165,14 +167,15 @@ class Engine extends EventEmitter {
   }
 
   signalStats() {
-    const done = this.signals.filter(s => s.status !== 'bloqueado' && s.status !== 'sombra' && ['favorável', 'desfavorável', 'empate'].includes(s.outcome));
+    const done = this.signals.filter(s => !['bloqueado', 'sombra', 'manual'].includes(s.status) && ['favorável', 'desfavorável', 'empate'].includes(s.outcome));
     const fav = done.filter(s => s.outcome === 'favorável').length;
     const blocked = this.signals.filter(s => s.status === 'bloqueado' && ['favorável', 'desfavorável', 'empate'].includes(s.outcome));
     const sh = this.signals.filter(s => s.status === 'sombra' && ['favorável', 'desfavorável', 'empate'].includes(s.outcome));
     const shFav = sh.filter(s => s.outcome === 'favorável').length;
     const byCat = {};
     for (const s of done) { const k = (s.catalog && s.catalog.status) || 'sem dado'; const b = byCat[k] = byCat[k] || { n: 0, favoraveis: 0 }; b.n++; if (s.outcome === 'favorável') b.favoraveis++; }
-    return { sombra: { avaliados: sh.length, favoraveis: shFav, taxa: sh.length ? shFav / sh.length : null, desde: (this.signals.find(s => s.status === 'sombra') || {}).createdAt || null }, bloqueados: { avaliados: blocked.length, favoraveisSeOperasse: blocked.filter(s => s.outcome === 'favorável').length }, porCatalogo: byCat, total: this.signals.length, avaliados: done.length, favoraveis: fav, taxa: done.length ? fav / done.length : null,
+    const man = this.signals.filter(s => s.status === 'manual' && s.outcome);
+    return { manuais: { n: man.length, favoraveis: man.filter(s => s.outcome === 'favorável').length }, sombra: { avaliados: sh.length, favoraveis: shFav, taxa: sh.length ? shFav / sh.length : null, desde: (this.signals.find(s => s.status === 'sombra') || {}).createdAt || null }, bloqueados: { avaliados: blocked.length, favoraveisSeOperasse: blocked.filter(s => s.outcome === 'favorável').length }, porCatalogo: byCat, total: this.signals.length, avaliados: done.length, favoraveis: fav, taxa: done.length ? fav / done.length : null,
       invalidados: this.signals.filter(s => s.status === 'invalidado').length };
   }
 
@@ -228,59 +231,68 @@ class Engine extends EventEmitter {
       call: AN.gates(an, 'CALL', this.cfg.filters), put: AN.gates(an, 'PUT', this.cfg.filters) };
   }
 
-  // ---------- acompanhamento da entrada manual ----------
+  // ---------- acompanhamento das entradas manuais (várias ao mesmo tempo) ----------
   markEntry(direction) {
     if (!['CALL', 'PUT'].includes(direction)) throw new Error('direção inválida');
     const c = this.candles.at(-1); if (!c) throw new Error('sem dados');
+    if (this.positions.length >= 20) throw new Error('limite de 20 entradas acompanhadas');
     const t = this.now();
-    this.position = { direction, symbol: this.symbol, name: nm(this.symbol), tf: this.tf, expiryMin: this.cfg.expiryMin, entryPrice: c.close, entryAt: t,
-      expiresAt: t + this.cfg.expiryMin * 60, status: 'MANTER', reason: 'operação acompanhada', price: c.close };
-    this.log(`Entrada marcada: ${direction} ${nm(this.symbol)} a ${c.close} · exp. ${this.cfg.expiryMin} min`, 'ok');
-    this._watchPosition(true); this.push();
+    const ps = { id: `${Date.now()}-${++this._posSeq}`, direction, symbol: this.symbol, name: nm(this.symbol), tf: this.tf, expiryMin: this.cfg.expiryMin,
+      entryPrice: c.close, entryAt: t, expiresAt: t + this.cfg.expiryMin * 60, status: 'MANTER', reason: 'operação acompanhada', price: c.close };
+    this.positions.push(ps);
+    this.log(`Entrada marcada: ${direction} ${nm(this.symbol)} a ${c.close} · exp. ${this.cfg.expiryMin} min (${this.positions.length} aberta(s))`, 'ok');
+    this._watchPositions(true); this.push();
   }
-  clearPosition() { this.position = null; this.push(); }
+  clearPosition(id) { this.positions = id ? this.positions.filter(p => p.id !== id) : []; this.emit('positions', this.positions); this.push(); }
+  get position() { return this.positions.at(-1) || null; }        // compatibilidade
 
   // Regra de abandono (não comprovada em backtest; o valor de venda antecipada depende da oferta da Deriv):
   // ABANDONAR quando o preço está contra a entrada por > 0,5×ATR E o modelo dá < 45% para a direção da entrada
-  // E ainda resta ≥ 20% do tempo. Fora isso, MANTER.
-  _watchPosition(force = false) {
-    const ps = this.position; if (!ps) return;
-    if (ps.symbol !== this.symbol || ps.tf !== this.tf) { ps.reason = 'abra o mesmo mercado no painel para acompanhar'; return; }
+  // E ainda resta ≥ 20% do tempo. Fora isso, MANTER. Entradas em outro mercado usam o preço do scanner.
+  _watchPositions(force = false) {
+    if (!this.positions.length) return;
     const nowMs = Date.now();
     if (!force && this._lastPos && nowMs - this._lastPos < 1000) return;
     this._lastPos = nowMs;
-    const t = this.now(), i = this.candles.length - 1, price = this.candles[i].close;
-    ps.price = price;
-    const sgn = ps.direction === 'CALL' ? 1 : -1, move = (price - ps.entryPrice) * sgn;
-    if (t >= ps.expiresAt) {
-      const res = move > 0 ? 'favorável' : move < 0 ? 'desfavorável' : 'empate';
-      this.log(`Operação ${ps.direction} encerrou: ${res} (entrada ${ps.entryPrice} → ${price})`, move > 0 ? 'ok' : 'warn');
-      this.emit('notify', { kind: 'fim', text: `Operação ${ps.direction} ${nm(this.symbol)} encerrou: ${res}` });
-      this.position = null; this.push(); return;
-    }
-    const a = atr(this.candles.slice(-60), 14).at(-1) || 0;
-    let pDir = null;
-    if (this.model) {
-      const e = prob.estimate(this.model, this.candles, i, this.cfg.minSamples);
-      if (e) {
-        const art = research.artifact(this.symbol, this.tf, this.cfg.expiryMin);
-        const pc = research.applyIsotonic(art && art.iso, e.pCall);
-        pDir = ps.direction === 'CALL' ? pc : 1 - pc;
+    const t = this.now(), done = [];
+    let a = null, pc = null;
+    for (const ps of this.positions) {
+      const here = ps.symbol === this.symbol;
+      const price = here ? this.candles.at(-1).close : (this.priceOf ? this.priceOf(ps.symbol) : null);
+      if (price == null) { ps.reason = 'sem preço deste mercado agora'; continue; }
+      ps.price = price;
+      const sgn = ps.direction === 'CALL' ? 1 : -1, move = (price - ps.entryPrice) * sgn;
+      ps.move = move;
+      if (t >= ps.expiresAt) {
+        const res = move > 0 ? 'favorável' : move < 0 ? 'desfavorável' : 'empate';
+        this.log(`Operação ${ps.direction} ${ps.name} encerrou: ${res} (entrada ${ps.entryPrice} → ${price})`, move > 0 ? 'ok' : 'warn');
+        this.emit('notify', { kind: 'fim', text: `Operação ${ps.direction} ${ps.name} encerrou: ${res}` });
+        this._record({ uid: 'm-' + ps.id, status: 'manual', stage: 'manual', symbol: ps.symbol, tf: ps.tf, expiryMin: ps.expiryMin, direction: ps.direction,
+          createdAt: Math.round(ps.entryAt * 1000), price: ps.entryPrice, exitPrice: price, outcome: res, candleOpen: Math.floor(ps.entryAt), expiresAt: ps.expiresAt });
+        done.push(ps.id); continue;
       }
+      const prev = ps.status;
+      if (here && ps.tf === this.tf) {
+        if (a == null) a = atr(this.candles.slice(-60), 14).at(-1) || 0;
+        if (pc == null && this.model) {
+          const e = prob.estimate(this.model, this.candles, this.candles.length - 1, this.cfg.minSamples);
+          if (e) { const art = research.artifact(this.symbol, this.tf, this.cfg.expiryMin); pc = research.applyIsotonic(art && art.iso, e.pCall); }
+        }
+        const pDir = pc == null ? null : ps.direction === 'CALL' ? pc : 1 - pc, left = (ps.expiresAt - t) / (ps.expiresAt - ps.entryAt);
+        ps.pDir = pDir; ps.atr = a;
+        if (move < -0.5 * a && pDir != null && pDir < 0.45 && left >= 0.2) {
+          ps.status = 'ABANDONAR';
+          ps.reason = `preço contra a entrada (${(move / (a || 1)).toFixed(2)}×ATR) e modelo ${(pDir * 100).toFixed(1)}% para ${ps.direction}`;
+        } else {
+          ps.status = 'MANTER';
+          ps.reason = move >= 0 ? 'a favor da entrada' : `contra, mas dentro do limite (${(move / (a || 1)).toFixed(2)}×ATR${pDir != null ? `, modelo ${(pDir * 100).toFixed(1)}%` : ''})`;
+        }
+      } else { ps.status = 'MANTER'; ps.reason = (move >= 0 ? 'a favor' : 'contra') + ' · alerta de abandono só com este mercado/gráfico aberto no painel'; }
+      if (ps.status === 'ABANDONAR' && prev !== 'ABANDONAR')
+        this.emit('notify', { kind: 'abandonar', text: `ABANDONE a operação ${ps.direction} ${ps.name}: ${ps.reason}` });
     }
-    const left = (ps.expiresAt - t) / (ps.expiresAt - ps.entryAt);
-    const prev = ps.status;
-    ps.pDir = pDir; ps.move = move; ps.atr = a;
-    if (move < -0.5 * a && pDir != null && pDir < 0.45 && left >= 0.2) {
-      ps.status = 'ABANDONAR';
-      ps.reason = `preço contra a entrada (${(move / (a || 1)).toFixed(2)}×ATR) e modelo ${(pDir * 100).toFixed(1)}% para ${ps.direction}`;
-    } else {
-      ps.status = 'MANTER';
-      ps.reason = move >= 0 ? 'a favor da entrada' : `contra, mas dentro do limite (${(move / (a || 1)).toFixed(2)}×ATR${pDir != null ? `, modelo ${(pDir * 100).toFixed(1)}%` : ''})`;
-    }
-    if (ps.status === 'ABANDONAR' && prev !== 'ABANDONAR')
-      this.emit('notify', { kind: 'abandonar', text: `ABANDONE a operação ${ps.direction} ${nm(this.symbol)}: ${ps.reason}` });
-    this.emit('position', ps);
+    if (done.length) { this.positions = this.positions.filter(p => !done.includes(p.id)); this.push(); }
+    this.emit('positions', this.positions);
   }
 
   _passes(e, i) {
@@ -375,7 +387,7 @@ class Engine extends EventEmitter {
       this.candles[this.candles.length - 1] = c;
       this.emit('candle', c);
       this._liveProb();
-      this._watchPosition();
+      this._watchPositions();
       return;
     }
     if (last && c.epoch > last.epoch) {
@@ -625,7 +637,7 @@ class Engine extends EventEmitter {
   }
 
   setConfig(c) {
-    if (c.expiryMin != null && !EXPIRIES.includes(Number(c.expiryMin))) throw new Error('expiração inválida (5 ou 15 min)');
+    if (c.expiryMin != null && !EXPIRIES.includes(Number(c.expiryMin))) throw new Error('expiração inválida (15 ou 60 min)');
     if (c.expiryMin != null && !research.contractRules(this.symbol).expiries.includes(Number(c.expiryMin))) throw new Error(`a Deriv não oferece ${c.expiryMin} min neste mercado (permitido: ${research.contractRules(this.symbol).expiries.join(', ')} min)`);
     if (c.maxDataAgeSec != null && !(Number(c.maxDataAgeSec) >= 3 && Number(c.maxDataAgeSec) <= 300)) throw new Error('idade máxima do dado entre 3 e 300 s');
     if (c.minProb != null && !(Number(c.minProb) >= 0.5 && Number(c.minProb) <= 0.95)) throw new Error('probabilidade mínima entre 50% e 95%');

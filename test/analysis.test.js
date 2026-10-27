@@ -65,9 +65,9 @@ test('sem dados futuros: análise da vela i não muda com velas posteriores', ()
 test('decisão ao vivo: bloqueio do motor vira AGUARDAR com motivo e auditoria', () => {
   const c = trend(300);
   const est = { pCall: 0.3, pPut: 0.7, p: 0.7, direction: 'PUT', n: 200, lo: 0.62, hi: 0.77, level: 'estado completo' };
-  const d = R.liveDecision(c, 299, est, { symbol: 'R_10', tf: '5m', expiryMin: 5 }, { minProb: 0.56, minSamples: 40 }, true);
+  const d = R.liveDecision(c, 299, est, { symbol: 'R_10', tf: '15m', expiryMin: 15 }, { minProb: 0.56, minSamples: 40 }, true);
   assert.strictEqual(d.ok, false); assert.match(d.reason, /^bloqueio: conflito/);
   assert.strictEqual(d.analysis.regime, 'C'); assert.ok(Array.isArray(d.analysis.contra) && d.analysis.indicadores.adx14 > 0);
-  const off = R.liveDecision(c, 299, est, { symbol: 'R_10', tf: '5m', expiryMin: 5 }, { minProb: 0.56, minSamples: 40, analise: 0 }, true);
+  const off = R.liveDecision(c, 299, est, { symbol: 'R_10', tf: '15m', expiryMin: 15 }, { minProb: 0.56, minSamples: 40, analise: 0 }, true);
   assert.strictEqual(off.ok, true, 'motor desligável por configuração');
 });

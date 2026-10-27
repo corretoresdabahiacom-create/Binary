@@ -31,7 +31,7 @@ const research = require('./research');
 const DEFAULT_SYMBOLS = ['frxEURUSD', 'frxGBPUSD', 'frxUSDJPY', 'frxAUDUSD', 'frxUSDCAD', 'frxUSDCHF', 'frxNZDUSD', 'frxEURGBP', 'frxEURJPY', 'frxGBPJPY'];
 const NAMES = { frxEURUSD: 'EUR/USD', frxGBPUSD: 'GBP/USD', frxUSDJPY: 'USD/JPY', frxAUDUSD: 'AUD/USD', frxUSDCAD: 'USD/CAD',
   frxUSDCHF: 'USD/CHF', frxNZDUSD: 'NZD/USD', frxEURGBP: 'EUR/GBP', frxEURJPY: 'EUR/JPY', frxGBPJPY: 'GBP/JPY' };
-const TFS = { '5m': 300, '15m': 900 };
+const TFS = { '15m': 900, '1h': 3600 };
 const EXPIRIES = [5, 15];
 const HIST = 10000, LIVE = 300;
 

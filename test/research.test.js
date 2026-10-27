@@ -3,6 +3,7 @@ process.env.DATA_DIR = process.env.DATA_DIR || require('fs').mkdtempSync(require
 const test = require('node:test');
 const assert = require('node:assert');
 const R = require('../server/research');
+R.clock.now = () => Date.UTC(2026, 9, 26, 13) / 1000; // horário com forex aberto na Deriv
 const { evaluateCombo, approve } = require('../server/backtest2');
 
 function rng(seed) { let x = seed; return () => (x = (x * 16807) % 2147483647) / 2147483647; }
@@ -66,23 +67,23 @@ test('decisão ao vivo: sem research usa v1; não aprovada bloqueia; liberar per
   const c = walk(400, 7);
   const est = { pCall: 0.62, pPut: 0.38, p: 0.62, direction: 'CALL', n: 200, lo: 0.55, hi: 0.69, level: 'estado completo' };
   const cfg = { minProb: 0.56, minSamples: 40, edgeMargin: 0.02, allowUnapproved: 0, analise: 0 };
-  const v1 = R.liveDecision(c, 399, est, { symbol: 'R_10', tf: '5m', expiryMin: 5 }, cfg, true);
+  const v1 = R.liveDecision(c, 399, est, { symbol: 'frxEURUSD', tf: '15m', expiryMin: 15 }, cfg, true);
   assert.strictEqual(v1.version, 'v1'); assert.ok(v1.ok);
-  R.saveResearch({ combos: { 'R_10|5m|5': { approved: false, iso: null, meta: null, payout: 0.95 } } });
-  const v2 = R.liveDecision(c, 399, est, { symbol: 'R_10', tf: '5m', expiryMin: 5 }, cfg, true);
+  R.saveResearch({ combos: { 'frxEURUSD|15m|15': { approved: false, iso: null, meta: null, payout: 0.95 } } });
+  const v2 = R.liveDecision(c, 399, est, { symbol: 'frxEURUSD', tf: '15m', expiryMin: 15 }, cfg, true);
   assert.strictEqual(v2.version, 'v2'); assert.strictEqual(v2.ok, false); assert.match(v2.reason, /não aprovada/);
-  const lib = R.liveDecision(c, 399, est, { symbol: 'R_10', tf: '5m', expiryMin: 5 }, { ...cfg, allowUnapproved: 1 }, true);
+  const lib = R.liveDecision(c, 399, est, { symbol: 'frxEURUSD', tf: '15m', expiryMin: 15 }, { ...cfg, allowUnapproved: 1 }, true);
   assert.ok(lib.ok && Math.abs(lib.ev - (0.62 * 0.95 - 0.38)) < 1e-9);
-  assert.strictEqual(R.liveDecision(c, 399, est, { symbol: 'R_10', tf: '5m', expiryMin: 5 }, cfg, false).ok, false, 'dado atrasado');
+  assert.strictEqual(R.liveDecision(c, 399, est, { symbol: 'frxEURUSD', tf: '15m', expiryMin: 15 }, cfg, false).ok, false, 'dado atrasado');
   require('fs').unlinkSync(R.RESEARCH_FILE());
 });
 
-test('regras da Deriv para forex: só 15 min e sem negociação 20:50–22:00 UTC', () => {
-  assert.deepStrictEqual(R.contractRules('frxEURUSD').expiries, [15]);
+test('regras da Deriv para forex: 15/60 min e sem negociação 20:50–22:00 UTC', () => {
+  assert.deepStrictEqual(R.contractRules('frxEURUSD').expiries, [15, 60]);
   assert.strictEqual(R.tradeable('frxEURUSD', Date.UTC(2026, 9, 26, 21, 0) / 1000), false);
   assert.strictEqual(R.tradeable('frxEURUSD', Date.UTC(2026, 9, 26, 13, 0) / 1000), true);
   const est = { pCall: 0.7, pPut: 0.3, p: 0.7, direction: 'CALL', n: 200, lo: 0.6, hi: 0.8, level: 'estado completo' };
-  const d = R.liveDecision([], 0, est, { symbol: 'frxEURUSD', tf: '5m', expiryMin: 5 }, { minSamples: 40, minProb: 0.56 }, true);
+  const d = R.liveDecision([], 0, est, { symbol: 'frxEURUSD', tf: '15m', expiryMin: 5 }, { minSamples: 40, minProb: 0.56 }, true);
   assert.strictEqual(d.ok, false); assert.match(d.reason, /mínimo 15/);
 });
 
