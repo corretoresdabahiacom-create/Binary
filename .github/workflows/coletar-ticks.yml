@@ -1,0 +1,51 @@
+# Coleta de ticks da Deriv (a API guarda só ~1 dia). Roda de 12 em 12 horas e grava em data/ticks da branch "dados-ticks".
+# PARA DESFAZER (quando o dono pedir): apagar este arquivo e a branch "dados-ticks".
+name: coletar-ticks
+on:
+  schedule:
+    - cron: '17 3,15 * * *'      # 00:17 e 12:17 no horário de Brasília
+  workflow_dispatch: {}
+permissions:
+  contents: write
+concurrency:
+  group: coletar-ticks
+  cancel-in-progress: false
+jobs:
+  coletar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci --omit=dev
+      - name: Baixar ticks
+        env:
+          DATA_DIR: ${{ runner.temp }}/novos
+        run: node scripts/coletar-ticks.js
+      - name: Guardar na branch dados-ticks
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          git config --global user.name "coletor-ticks"
+          git config --global user.email "coletor-ticks@users.noreply.github.com"
+          REPO_URL="https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
+          if git ls-remote --exit-code --heads "$REPO_URL" dados-ticks >/dev/null 2>&1; then
+            git clone --depth 1 --branch dados-ticks "$REPO_URL" "$RUNNER_TEMP/dados"
+          else
+            git init -b dados-ticks "$RUNNER_TEMP/dados"
+            git -C "$RUNNER_TEMP/dados" remote add origin "$REPO_URL"
+          fi
+          mkdir -p "$RUNNER_TEMP/dados/ticks"
+          # acrescenta só ticks que ainda não existem (cada arquivo: <ativo>-<AAAAMMDD>.csv, linhas "epoch,preço")
+          for f in "$RUNNER_TEMP"/novos/ticks/*.csv; do
+            [ -e "$f" ] || continue
+            dest="$RUNNER_TEMP/dados/ticks/$(basename "$f")"
+            cat "$dest" "$f" 2>/dev/null | awk -F, 'NF>=2 && !seen[$1]++' | sort -t, -k1,1n > "$dest.tmp" && mv "$dest.tmp" "$dest"
+          done
+          cd "$RUNNER_TEMP/dados"
+          git add -A
+          if git diff --cached --quiet; then echo "sem novidades"; exit 0; fi
+          git commit -qm "ticks $(date -u +%F\ %H:%M) UTC"
+          git push origin dados-ticks
