@@ -3,15 +3,20 @@ const EventEmitter = require('events');
 const fs = require('fs');
 const path = require('path');
 const deriv = require('./deriv');
-const { computeSeries, snapshot, localScore } = require('./indicators');
+const { computeSeries, snapshot, localScore, atr } = require('./indicators');
 const { askClaude } = require('./claude');
 const catalogLib = require('./catalog');
 const prob = require('./probability');
+const research = require('./research');
+const SR = require('./levels');
+const AN = require('./analysis');
+const { NAMES } = require('./scanner');
+const nm = sym => NAMES[sym] || sym;
 
-const TRADES_FILE = path.join(__dirname, '..', 'data', 'trades.json');
-const SIGNALS_FILE = path.join(__dirname, '..', 'data', 'signals.json');
-const GRANS = { '5m': 300, '15m': 900, '1h': 3600 };
-const EXPIRIES = [5, 15];                      // minutos; independente do timeframe
+const TRADES_FILE = path.join(process.env.DATA_DIR || path.join(__dirname, '..', 'data'), 'trades.json');
+const SIGNALS_FILE = path.join(process.env.DATA_DIR || path.join(__dirname, '..', 'data'), 'signals.json');
+const GRANS = { '15m': 900, '1h': 3600 };              // gráfico de 5 min removido (pedido do usuário)
+const EXPIRIES = [15, 60];                      // minutos; independente do gráfico                      // minutos; independente do timeframe
 const STRATEGY = 'indicadores-v1';
 const SOURCE = 'Deriv API oficial (WebSocket público)';
 
@@ -23,18 +28,23 @@ class Engine extends EventEmitter {
     this.account = null;          // { account_id, account_type, currency, balance }
     this.pub = null;              // socket público (velas)
     this.trade = null;            // socket de negociação da conta ativa
-    this.symbol = 'R_100';
-    this.tf = '5m';
+    this.symbol = 'frxEURUSD';
+    this.tf = '15m';
     this.candles = [];
     this.subId = null;
     this.serverOffset = 0;        // segundos (hora Deriv - hora local)
     this.mode = 'manual';         // manual | auto | catalog
     this.running = false;
-    this.cfg = { stake: 1, minConfidence: 0.7, maxLoss: 10, maxConsecLosses: 3, maxTrades: 20, windowPct: 0.1, expiryMin: 5, maxDataAgeSec: 20, minProb: 0.56, minSamples: 40 };
+    this.cfg = { stake: 1, minConfidence: 0.7, maxLoss: 10, maxConsecLosses: 3, maxTrades: 20, windowPct: 0.1, expiryMin: 15, maxDataAgeSec: 20, minProb: 0.56, minSamples: 40, edgeMargin: 0.02, allowUnapproved: 0, catalogFilter: 0, analise: 1, filters: { ...AN.DEFAULTS } };
     this.hist = [];               // histórico longo de velas fechadas (Deriv)
     this.model = null;            // tabela de probabilidade
     this.prob = null;             // estimativa ao vivo
     this.tickLatencyMs = null;
+    this.positions = [];          // entradas MANUAIS marcadas pelo usuário (o app não envia ordens)
+    this._posSeq = 0;
+    this.priceOf = null;          // (símbolo) => último preço (do scanner), para entradas em outros mercados
+    this.perf = { tickMsAvg: null, tickMsMax: 0, loopLagP99Ms: null, ticks: 0 };   // desempenho medido (relógio monotônico)
+    this.catalogCheck = null;     // (sym, tf, exp, candles, i, dir) => concordância do catalogador (scanner)         // entrada MANUAL marcada pelo usuário (o app não envia ordens)
     this._histKey = null;
     this.tradingEnabled = process.env.TRADING_ENABLED === '1'; // MVP: só análise, sem ordens
     this.lastTickAt = null;       // hora local do último dado recebido
@@ -72,11 +82,13 @@ class Engine extends EventEmitter {
       feedDelayMs: this.feedDelayMs, serverNow: this.now(),
       catalog: this.catalog && { validated: this.catalog.validated, rulesTested: this.catalog.rulesTested, candles: this.catalog.candles, createdAt: this.catalog.createdAt },
       hasClaude: !!process.env.ANTHROPIC_API_KEY,
-      tradingEnabled: this.tradingEnabled, source: SOURCE, market: 'sintético Deriv (não OTC)',
+      tradingEnabled: this.tradingEnabled, source: SOURCE, market: 'forex Deriv (não OTC)',
       dataState: this.dataState, blockReason: this.blockReason,
       dataAgeMs: this.lastTickAt ? Date.now() - this.lastTickAt : null,
       lastPrice: this.candles.length ? this.candles[this.candles.length - 1].close : null,
-      expiries: EXPIRIES, tfs: Object.keys(GRANS), prob: this.prob, tickLatencyMs: this.tickLatencyMs,
+      allowedExpiries: research.contractRules(this.symbol).expiries,
+      perf: { tickMsAvg: this.perf.tickMsAvg == null ? null : +this.perf.tickMsAvg.toFixed(2), tickMsMax: +Math.max(this.perf.tickMsMax, this.perf.tickMsMaxPrev || 0).toFixed(2), loopLagP99Ms: this.perf.loopLagP99Ms },
+      flow: this.flow || null, levels: this.levels || null, analysis: this.analysis || null, positions: this.positions, expiries: EXPIRIES, tfs: Object.keys(GRANS), prob: this.prob, tickLatencyMs: this.tickLatencyMs,
       model: this.model && { name: this.model.model, horizon: this.model.horizon, samples: this.model.samples, ties: this.model.ties, from: this.model.from, to: this.model.to },
       open: this.open && this._openView(),
       signal: this.signal,
@@ -155,9 +167,15 @@ class Engine extends EventEmitter {
   }
 
   signalStats() {
-    const done = this.signals.filter(s => ['favorável', 'desfavorável', 'empate'].includes(s.outcome));
+    const done = this.signals.filter(s => !['bloqueado', 'sombra', 'manual'].includes(s.status) && ['favorável', 'desfavorável', 'empate'].includes(s.outcome));
     const fav = done.filter(s => s.outcome === 'favorável').length;
-    return { total: this.signals.length, avaliados: done.length, favoraveis: fav, taxa: done.length ? fav / done.length : null,
+    const blocked = this.signals.filter(s => s.status === 'bloqueado' && ['favorável', 'desfavorável', 'empate'].includes(s.outcome));
+    const sh = this.signals.filter(s => s.status === 'sombra' && ['favorável', 'desfavorável', 'empate'].includes(s.outcome));
+    const shFav = sh.filter(s => s.outcome === 'favorável').length;
+    const byCat = {};
+    for (const s of done) { const k = (s.catalog && s.catalog.status) || 'sem dado'; const b = byCat[k] = byCat[k] || { n: 0, favoraveis: 0 }; b.n++; if (s.outcome === 'favorável') b.favoraveis++; }
+    const man = this.signals.filter(s => s.status === 'manual' && s.outcome);
+    return { manuais: { n: man.length, favoraveis: man.filter(s => s.outcome === 'favorável').length }, sombra: { avaliados: sh.length, favoraveis: shFav, taxa: sh.length ? shFav / sh.length : null, desde: (this.signals.find(s => s.status === 'sombra') || {}).createdAt || null }, bloqueados: { avaliados: blocked.length, favoraveisSeOperasse: blocked.filter(s => s.outcome === 'favorável').length }, porCatalogo: byCat, total: this.signals.length, avaliados: done.length, favoraveis: fav, taxa: done.length ? fav / done.length : null,
       invalidados: this.signals.filter(s => s.status === 'invalidado').length };
   }
 
@@ -195,22 +213,96 @@ class Engine extends EventEmitter {
     const i = this.candles.length - 1, c = this.candles[i];
     const e = prob.estimate(this.model, this.candles, i, this.cfg.minSamples);
     if (!e) { this.prob = { stage: 'AGUARDAR', reason: 'indicadores insuficientes' }; return this.emit('prob', this.prob); }
-    const pass = this._passes(e);
-    this.prob = { ...e, stage: pass.ok ? 'preliminar' : 'AGUARDAR', reason: pass.reason, candle: c.epoch, at: nowMs };
+    const pass = this._passes(e, i);
+    this.prob = { ...e, direction: pass.direction || e.direction, p: pass.p ?? e.p, version: pass.version, catalog: pass.catalog, approved: pass.approved, ev: pass.ev, stage: pass.ok ? 'preliminar' : 'AGUARDAR', reason: pass.reason, candle: c.epoch, at: nowMs };
     const elapsed = (this.now() - c.epoch) / this.gran();
     if (pass.ok && elapsed >= 0.5 && this._prelimFor !== c.epoch) {
       this._prelimFor = c.epoch;
-      this.emit('notify', { kind: 'preliminar', text: `Preliminar ${e.direction} ${(e.p * 100).toFixed(1)}% · ${this.symbol} · confirma no fechamento da vela` });
+      this.emit('notify', { kind: 'preliminar', text: `Preliminar ${pass.direction} ${(pass.p * 100).toFixed(1)}% · ${nm(this.symbol)} · confirma no fechamento da vela` });
     }
     this.emit('prob', this.prob);
   }
 
-  _passes(e) {
+  // Análise da última vela FECHADA (exibida no painel; não muda durante a formação da vela seguinte).
+  _analyzeClosed() {
+    const i = this.candles.length - 2; if (i < 1) { this.analysis = null; return; }
+    const an = AN.analyze(this.candles, i, { gran: this.gran(), cfg: this.cfg.filters });
+    this.analysis = { ...AN.audit(an, null), velaFechada: this.candles[i].epoch,
+      call: AN.gates(an, 'CALL', this.cfg.filters), put: AN.gates(an, 'PUT', this.cfg.filters) };
+  }
+
+  // ---------- acompanhamento das entradas manuais (várias ao mesmo tempo) ----------
+  markEntry(direction) {
+    if (!['CALL', 'PUT'].includes(direction)) throw new Error('direção inválida');
+    const c = this.candles.at(-1); if (!c) throw new Error('sem dados');
+    if (this.positions.length >= 20) throw new Error('limite de 20 entradas acompanhadas');
+    const t = this.now();
+    const ps = { id: `${Date.now()}-${++this._posSeq}`, direction, symbol: this.symbol, name: nm(this.symbol), tf: this.tf, expiryMin: this.cfg.expiryMin,
+      entryPrice: c.close, entryAt: t, expiresAt: t + this.cfg.expiryMin * 60, status: 'MANTER', reason: 'operação acompanhada', price: c.close };
+    this.positions.push(ps);
+    this.log(`Entrada marcada: ${direction} ${nm(this.symbol)} a ${c.close} · exp. ${this.cfg.expiryMin} min (${this.positions.length} aberta(s))`, 'ok');
+    this._watchPositions(true); this.push();
+  }
+  clearPosition(id) { this.positions = id ? this.positions.filter(p => p.id !== id) : []; this.emit('positions', this.positions); this.push(); }
+  get position() { return this.positions.at(-1) || null; }        // compatibilidade
+
+  // Regra de abandono (não comprovada em backtest; o valor de venda antecipada depende da oferta da Deriv):
+  // ABANDONAR quando o preço está contra a entrada por > 0,5×ATR E o modelo dá < 45% para a direção da entrada
+  // E ainda resta ≥ 20% do tempo. Fora isso, MANTER. Entradas em outro mercado usam o preço do scanner.
+  _watchPositions(force = false) {
+    if (!this.positions.length) return;
+    const nowMs = Date.now();
+    if (!force && this._lastPos && nowMs - this._lastPos < 1000) return;
+    this._lastPos = nowMs;
+    const t = this.now(), done = [];
+    let a = null, pc = null;
+    for (const ps of this.positions) {
+      const here = ps.symbol === this.symbol;
+      const price = here ? this.candles.at(-1).close : (this.priceOf ? this.priceOf(ps.symbol) : null);
+      if (price == null) { ps.reason = 'sem preço deste mercado agora'; continue; }
+      ps.price = price;
+      const sgn = ps.direction === 'CALL' ? 1 : -1, move = (price - ps.entryPrice) * sgn;
+      ps.move = move;
+      if (t >= ps.expiresAt) {
+        const res = move > 0 ? 'favorável' : move < 0 ? 'desfavorável' : 'empate';
+        this.log(`Operação ${ps.direction} ${ps.name} encerrou: ${res} (entrada ${ps.entryPrice} → ${price})`, move > 0 ? 'ok' : 'warn');
+        this.emit('notify', { kind: 'fim', text: `Operação ${ps.direction} ${ps.name} encerrou: ${res}` });
+        this._record({ uid: 'm-' + ps.id, status: 'manual', stage: 'manual', symbol: ps.symbol, tf: ps.tf, expiryMin: ps.expiryMin, direction: ps.direction,
+          createdAt: Math.round(ps.entryAt * 1000), price: ps.entryPrice, exitPrice: price, outcome: res, candleOpen: Math.floor(ps.entryAt), expiresAt: ps.expiresAt });
+        done.push(ps.id); continue;
+      }
+      const prev = ps.status;
+      if (here && ps.tf === this.tf) {
+        if (a == null) a = atr(this.candles.slice(-60), 14).at(-1) || 0;
+        if (pc == null && this.model) {
+          const e = prob.estimate(this.model, this.candles, this.candles.length - 1, this.cfg.minSamples);
+          if (e) { const art = research.artifact(this.symbol, this.tf, this.cfg.expiryMin); pc = research.applyIsotonic(art && art.iso, e.pCall); }
+        }
+        const pDir = pc == null ? null : ps.direction === 'CALL' ? pc : 1 - pc, left = (ps.expiresAt - t) / (ps.expiresAt - ps.entryAt);
+        ps.pDir = pDir; ps.atr = a;
+        if (move < -0.5 * a && pDir != null && pDir < 0.45 && left >= 0.2) {
+          ps.status = 'ABANDONAR';
+          ps.reason = `preço contra a entrada (${(move / (a || 1)).toFixed(2)}×ATR) e modelo ${(pDir * 100).toFixed(1)}% para ${ps.direction}`;
+        } else {
+          ps.status = 'MANTER';
+          ps.reason = move >= 0 ? 'a favor da entrada' : `contra, mas dentro do limite (${(move / (a || 1)).toFixed(2)}×ATR${pDir != null ? `, modelo ${(pDir * 100).toFixed(1)}%` : ''})`;
+        }
+      } else { ps.status = 'MANTER'; ps.reason = (move >= 0 ? 'a favor' : 'contra') + ' · alerta de abandono só com este mercado/gráfico aberto no painel'; }
+      if (ps.status === 'ABANDONAR' && prev !== 'ABANDONAR')
+        this.emit('notify', { kind: 'abandonar', text: `ABANDONE a operação ${ps.direction} ${ps.name}: ${ps.reason}` });
+    }
+    if (done.length) { this.positions = this.positions.filter(p => !done.includes(p.id)); this.push(); }
+    this.emit('positions', this.positions);
+  }
+
+  _passes(e, i) {
     if (this.dataState !== 'ok') return { ok: false, reason: 'dados ' + this.dataState };
-    if (e.n < this.cfg.minSamples) return { ok: false, reason: `amostra pequena (${e.n})` };
-    if (e.p < this.cfg.minProb) return { ok: false, reason: `probabilidade ${(e.p * 100).toFixed(1)}% < mínimo ${(this.cfg.minProb * 100).toFixed(0)}%` };
-    if (e.lo <= 0.5) return { ok: false, reason: `intervalo de confiança inclui 50% (${(e.lo * 100).toFixed(1)}–${(e.hi * 100).toFixed(1)}%)` };
-    return { ok: true, reason: `${e.n} casos semelhantes (${e.level}); IC95% ${(e.lo * 100).toFixed(1)}–${(e.hi * 100).toFixed(1)}%` };
+    const pass = research.liveDecision(this.candles, i, e, { symbol: this.symbol, tf: this.tf, expiryMin: this.cfg.expiryMin }, this.cfg, true);
+    if (!pass.ok || !this.catalogCheck) return pass;
+    const a = this.catalogCheck(this.symbol, this.tf, this.cfg.expiryMin, this.candles, i, pass.direction), f = +this.cfg.catalogFilter || 0;
+    if (f >= 1 && (a.status === 'discorda' || a.status === 'dividido')) return { ...pass, catalog: a, ok: false, reason: `catálogo ${a.status}` };
+    if (f >= 2 && a.status !== 'concorda') return { ...pass, catalog: a, ok: false, reason: `catálogo não confirma (${a.status})` };
+    return { ...pass, catalog: a };
   }
 
   async _ensurePublic() {
@@ -247,13 +339,36 @@ class Engine extends EventEmitter {
   }
 
   // ---------- velas ----------
+  // ---------- fluxo de ticks (tape reading possível: só preço, sem volume/agressor) ----------
+  async subscribeTicks() {
+    if (this.tickSub) { this.pub.send({ forget: this.tickSub }).catch(() => {}); this.tickSub = null; }
+    this.ticks = []; this.flow = null;
+    try { const r = await this.pub.send({ ticks: this.symbol }, { subscribe: true, timeoutMs: 8000 }); this.tickSub = r.subscription && r.subscription.id; if (r.tick) this._onTick(r.tick); }
+    catch (e) { this.flow = { erro: 'fluxo de ticks indisponível: ' + e.message }; }
+  }
+  _onTick(tk) {
+    if (tk.symbol && tk.symbol !== this.symbol) return;
+    const q = +tk.quote, e = +tk.epoch; if (!Number.isFinite(q)) return;
+    const prev = this.ticks.at(-1), d = prev ? q - prev.q : 0;
+    this.ticks.push({ e, q, s: d > 0 ? 1 : d < 0 ? -1 : prev ? prev.s : 0 });
+    while (this.ticks.length && this.ticks[0].e < e - 900) this.ticks.shift();     // guarda 15 min
+    const nowMs = Date.now(); if (this._lastFlow && nowMs - this._lastFlow < 1000) return; this._lastFlow = nowMs;
+    const w = W => { const xs = this.ticks.filter(x => x.e > e - W); const up = xs.filter(x => x.s > 0).length, dn = xs.filter(x => x.s < 0).length;
+      return { ticks: xs.length, porMin: +(xs.length / (W / 60)).toFixed(1), alta: up, baixa: dn, desequilibrio: up + dn ? +((up - dn) / (up + dn)).toFixed(3) : 0 }; };
+    this.flow = { e, w1: w(60), w5: w(300), w15: w(900), nota: 'regra do tick (sem volume na Deriv); teste em scripts/fluxo.js' };
+    this.emit('flow', this.flow);
+  }
+
   async subscribeCandles() {
+    this.subscribeTicks().catch(() => {});
     if (this.subId) { this.pub.send({ forget: this.subId }).catch(() => {}); this.subId = null; }
     const res = await this.pub.send({ ticks_history: this.symbol, style: 'candles', granularity: this.gran(), count: 500, end: 'latest' }, { subscribe: true, timeoutMs: 30000 });
     this.subId = res.subscription && res.subscription.id;
     this.candles = (res.candles || []).map(c => ({ epoch: c.epoch, open: +c.open, high: +c.high, low: +c.low, close: +c.close }));
     this.lastTickAt = Date.now();
     this.hist = []; this.prob = null; this.rebuildModel(); this.loadHistory();
+    this.levels = SR.levels(this.candles, this.candles.length - 2);
+    this._analyzeClosed();
     this.catalog = catalogLib.load(this.symbol, this.gran());
     if (this.signal && this.signal.status === 'valido') this._invalidate('ativo ou timeframe alterado');
     this.signal = null;
@@ -267,11 +382,22 @@ class Engine extends EventEmitter {
     if (symbol) this.symbol = symbol;
     if (tf && !GRANS[tf]) throw new Error('timeframe inválido');
     if (tf) this.tf = tf;
+    const ok = research.contractRules(this.symbol).expiries;          // ex.: forex só aceita 15 min na Deriv
+    if (!ok.includes(this.cfg.expiryMin)) { this.cfg.expiryMin = ok[0]; this.log(`Expiração ajustada para ${ok[0]} min (mínimo da Deriv neste mercado)`, 'warn'); }
     await this.subscribeCandles();
   }
 
   _onPublic(m) {
+    if (m.tick) return this._onTick(m.tick);
     if (!m.ohlc) return;
+    const t0 = performance.now();
+    try { this._onOhlc(m); } finally {
+      const d = performance.now() - t0, p = this.perf; p.ticks++;
+      p.tickMsAvg = p.tickMsAvg == null ? d : p.tickMsAvg * 0.95 + d * 0.05; if (d > p.tickMsMax) p.tickMsMax = d;
+    }
+  }
+
+  _onOhlc(m) {
     const o = m.ohlc;
     this.lastTickAt = Date.now();
     if (o.epoch) this.tickLatencyMs = Math.max(0, Math.round(this.lastTickAt - (+o.epoch - this.serverOffset) * 1000));
@@ -283,6 +409,7 @@ class Engine extends EventEmitter {
       this.candles[this.candles.length - 1] = c;
       this.emit('candle', c);
       this._liveProb();
+      this._watchPositions();
       return;
     }
     if (last && c.epoch > last.epoch) {
@@ -292,7 +419,11 @@ class Engine extends EventEmitter {
       this.emit('candle', c);
       const closed = this.candles[this.candles.length - 2];
       if (this.hist.length && closed.epoch > this.hist.at(-1).epoch) { this.hist.push(closed); if (this.hist.length > 12000) this.hist.shift(); }
-      this.rebuildModel();
+      // incremental (≈0,7 ms) em vez de refazer o modelo inteiro (≈50 ms) no momento mais sensível: o fechamento da vela
+      if (this.model && this.hist.length && this.model.horizon === this.horizon()) prob.addSample(this.model, this.hist, this.hist.length - 1 - this.model.horizon);
+      else this.rebuildModel();
+      this.levels = SR.levels(this.candles, this.candles.length - 2);
+      this._analyzeClosed();
       this._evaluateSignals();
       this._onCandleClosed(this.candles.length - 2, c).catch(e => this.log('sinal: ' + e.message, 'error'));
       this.push();
@@ -359,7 +490,7 @@ class Engine extends EventEmitter {
     };
     this._record(this.signal);
     this.emit('signal', this.signal);
-    this.emit('notify', { kind: 'sinal', text: `${direction === 'CALL' ? 'CALL ▲' : 'PUT ▼'} ${this.symbol} · ${this.tf} · exp. ${this.cfg.expiryMin} min` });
+    this.emit('notify', { kind: 'sinal', text: `${direction === 'CALL' ? 'CALL ▲' : 'PUT ▼'} ${nm(this.symbol)} · ${this.tf} · exp. ${this.cfg.expiryMin} min` });
     this.push();
 
     if (this.running && this.mode !== 'manual') {
@@ -376,26 +507,32 @@ class Engine extends EventEmitter {
   // Sinal confirmado: vela i acabou de fechar; entrada na abertura da vela seguinte.
   _probSignal(i, newCandle) {
     const e = prob.estimate(this.model, this.candles, i, this.cfg.minSamples);
-    const pass = e ? this._passes(e) : { ok: false, reason: this.model ? 'indicadores insuficientes' : (this.prob && this.prob.reason) || 'modelo indisponível' };
+    const pass = e ? this._passes(e, i) : { ok: false, reason: this.model ? 'indicadores insuficientes' : (this.prob && this.prob.reason) || 'modelo indisponível' };
+    if (e && !pass.ok && pass.blocks && pass.direction) {
+      this._record({ uid: `${newCandle.epoch}-${this.symbol}-${this.tf}-${pass.direction}-b`, status: 'bloqueado', stage: 'bloqueado',
+        symbol: this.symbol, tf: this.tf, expiryMin: this.cfg.expiryMin, strategy: e.model, source: SOURCE, createdAt: Date.now(),
+        direction: pass.direction, confidence: pass.p, version: pass.version, reason: pass.reason, blocks: pass.blocks, analysis: pass.analysis,
+        candleOpen: newCandle.epoch, expiresAt: newCandle.epoch, price: newCandle.open });
+    }
     if (!e || !pass.ok) {
       this.prob = { ...(e || {}), stage: 'AGUARDAR', reason: pass.reason, candle: newCandle.epoch, at: Date.now() };
       this.emit('prob', this.prob); this.push(); return;
     }
     const decidedAt = Date.now();
     this.signal = {
-      uid: `${newCandle.epoch}-${this.symbol}-${this.tf}-${e.direction}`, status: 'valido', stage: 'confirmado',
+      uid: `${newCandle.epoch}-${this.symbol}-${this.tf}-${pass.direction}`, status: 'valido', stage: 'confirmado',
       symbol: this.symbol, tf: this.tf, expiryMin: this.cfg.expiryMin, strategy: e.model, source: SOURCE,
       createdAt: decidedAt, lastDataAt: this.lastTickAt, dataAgeMs: decidedAt - this.lastTickAt,
-      id: ++this.signalSeq, direction: e.direction, kind: 'probabilidade',
-      confidence: e.p, pCall: e.pCall, pPut: e.pPut, lo: e.lo, hi: e.hi, n: e.n, level: e.level, state: e.state,
+      id: ++this.signalSeq, direction: pass.direction, kind: 'probabilidade',
+      confidence: pass.p, ev: pass.ev, version: pass.version, catalog: pass.catalog, analysis: pass.analysis, pCall: e.pCall, pPut: e.pPut, lo: e.lo, hi: e.hi, n: e.n, level: e.level, state: e.state,
       reason: pass.reason, ai: false, rule: null,
       candleOpen: newCandle.epoch, expiresAt: newCandle.epoch + Math.round(this.gran() * this.cfg.windowPct),
       price: newCandle.open, basePrice: this.candles[i].close,
     };
-    this.prob = { ...e, stage: 'confirmado', reason: pass.reason, candle: newCandle.epoch, at: decidedAt };
+    this.prob = { ...e, direction: pass.direction, p: pass.p, version: pass.version, approved: pass.approved, ev: pass.ev, stage: 'confirmado', reason: pass.reason, candle: newCandle.epoch, at: decidedAt };
     this._record(this.signal);
     this.emit('signal', this.signal); this.emit('prob', this.prob);
-    this.emit('notify', { kind: 'sinal', text: `ENTRE AGORA ${e.direction === 'CALL' ? 'CALL ▲' : 'PUT ▼'} ${(e.p * 100).toFixed(1)}% · ${this.symbol} ${this.tf} · exp. ${this.cfg.expiryMin} min · janela ${Math.round(this.gran() * this.cfg.windowPct)} s` });
+    this.emit('notify', { kind: 'sinal', text: `ENTRE AGORA ${pass.direction === 'CALL' ? 'CALL ▲' : 'PUT ▼'} ${(pass.p * 100).toFixed(1)}% · ${nm(this.symbol)} ${this.tf} · exp. ${this.cfg.expiryMin} min · janela ${Math.round(this.gran() * this.cfg.windowPct)} s` });
     this.push();
   }
 
@@ -522,10 +659,17 @@ class Engine extends EventEmitter {
   }
 
   setConfig(c) {
-    if (c.expiryMin != null && !EXPIRIES.includes(Number(c.expiryMin))) throw new Error('expiração inválida (5 ou 15 min)');
+    if (c.expiryMin != null && !EXPIRIES.includes(Number(c.expiryMin))) throw new Error('expiração inválida (15 ou 60 min)');
+    if (c.expiryMin != null && !research.contractRules(this.symbol).expiries.includes(Number(c.expiryMin))) throw new Error(`a Deriv não oferece ${c.expiryMin} min neste mercado (permitido: ${research.contractRules(this.symbol).expiries.join(', ')} min)`);
     if (c.maxDataAgeSec != null && !(Number(c.maxDataAgeSec) >= 3 && Number(c.maxDataAgeSec) <= 300)) throw new Error('idade máxima do dado entre 3 e 300 s');
     if (c.minProb != null && !(Number(c.minProb) >= 0.5 && Number(c.minProb) <= 0.95)) throw new Error('probabilidade mínima entre 50% e 95%');
     if (c.minSamples != null && !(Number(c.minSamples) >= 10)) throw new Error('amostra mínima ≥ 10');
+    if (c.edgeMargin != null && !(Number(c.edgeMargin) >= 0 && Number(c.edgeMargin) <= 0.2)) throw new Error('margem entre 0 e 20 p.p.');
+    if (c.allowUnapproved != null) c.allowUnapproved = c.allowUnapproved ? 1 : 0;
+    if (c.filters && typeof c.filters === 'object') {
+      for (const [k, v] of Object.entries(c.filters)) if (k in AN.DEFAULTS && Number.isFinite(+v)) this.cfg.filters[k] = +v;
+      delete c.filters; this._analyzeClosed();
+    }
     const oldExp = this.cfg.expiryMin;
     for (const k of Object.keys(this.cfg)) if (c[k] != null && !Number.isNaN(Number(c[k]))) this.cfg[k] = Number(c[k]);
     if (this.cfg.expiryMin !== oldExp && this.candles.length) {

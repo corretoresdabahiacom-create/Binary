@@ -1,4 +1,5 @@
 'use strict';
+process.env.DATA_DIR = process.env.DATA_DIR || require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'tac-test-')); // testes nunca tocam data/ real
 // Servidor web real + Deriv simulado, falando pelo mesmo WebSocket que o navegador usa.
 process.env.TRADING_ENABLED = '1'; // estes testes exercitam o caminho de ordens (desligado por padrão)
 const test = require('node:test');
@@ -14,7 +15,7 @@ test('servidor web: conectar, receber velas, comprar, origem estranha recusada',
   const PORT = 3917;
   const child = spawn(process.execPath, ['server/index.js'], {
     cwd: require('path').join(__dirname, '..'),
-    env: { ...process.env, PORT, DERIV_REST_BASE: `http://127.0.0.1:${mock.port}`, DERIV_WS_PUBLIC: `ws://127.0.0.1:${mock.port}/trading/v1/options/ws/public`, ANTHROPIC_API_KEY: '' },
+    env: { ...process.env, PORT, DERIV_REST_BASE: `http://127.0.0.1:${mock.port}`, DERIV_WS_PUBLIC: `ws://127.0.0.1:${mock.port}/trading/v1/options/ws/public`, ANTHROPIC_API_KEY: '', SCANNER: '0', DATA_DIR: require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'tac-')) }, // nunca grava no histórico real
     stdio: 'pipe',
   });
   try {

@@ -6,7 +6,8 @@ Monitor de mercado para **decisão manual**: o app mostra o gráfico, emite CALL
 
 **Como rodar no Windows:** instale Node.js 20+ (nodejs.org), descompacte o ZIP, dê dois cliques em `iniciar.bat`. Abre em http://localhost:3010. Nenhum token é necessário para o MVP.
 
-**O que o MVP faz**
+**O que o MVP faz** (foco em **forex**: 10 pares no scanner; índices Volatility retirados por não terem vantagem possível — são gerados por sorteio)
+- **Acompanhamento da entrada:** botões “Entrei CALL/PUT” (nenhuma ordem é enviada). O app avisa **ABANDONAR** se o preço virar contra a entrada por mais de 0,5×ATR e o modelo cair abaixo de 45% para a sua direção, com ≥20% do tempo restante; senão **MANTER**. Regra não comprovada em backtest.
 - Dados da **API oficial da Deriv** (WebSocket público), índices sintéticos (Volatility). Fonte identificada na tela.
 - Gráfico de velas **5 min / 15 min / 1 h**; **expiração 5 ou 15 min** escolhida à parte do timeframe.
 - **Diagnóstico da fonte:** estado (OK / DESATUALIZADO / DESCONECTADO), idade do último dado, último preço.
@@ -16,10 +17,35 @@ Monitor de mercado para **decisão manual**: o app mostra o gráfico, emite CALL
   - Sinal só sai com: probabilidade ≥ mínimo (padrão 56%), ≥ 40 casos, IC95% inteiro acima de 50% e dados frescos. Caso contrário: **AGUARDAR** com o motivo.
   - Expiração precisa ser múltipla do gráfico (ex.: gráfico 15 min + expiração 5 min = indisponível).
   - Em índices sintéticos (gerador aleatório) o esperado é quase sempre AGUARDAR — isso é o modelo funcionando, não defeito.
+- **Backtest v2 / regra v2 (botão "Rodar backtest v2" ou `npm run backtest2`):** com dados reais da Deriv, por ativo × gráfico × expiração:
+  - walk-forward com embargo; operações **sem sobreposição** (faixa de confiança honesta);
+  - **calibração isotônica** da probabilidade (quando o modelo diz 58%, deve acertar ~58%);
+  - **meta-modelo** (regressão logística) com features de **sessão do câmbio** (Ásia/Londres/sobreposição/NY), percentil de volatilidade, RSI, Bollinger, MACD e impulso — escolhe entre CALL e PUT e filtra sinais fracos; uma 2ª calibração fora da amostra anula o meta-modelo se ele não provar valor;
+  - **payout real** da Deriv (quando a API pública fornece; senão 95%, marcado) e decisão por **valor esperado** (prob. final ≥ empate + margem);
+  - **Benjamini-Hochberg (FDR 10%)** entre as combinações: só as **aprovadas** (significativas, VE>0, ≥30 operações independentes) notificam. Opção para avisar também as não aprovadas.
+  - Resultado salvo em `data/research.json`; painel e scanner usam automaticamente as mesmas funções (`server/research.js`).
+- **Suporte e resistência:** topos/fundos confirmados (fractais), agrupados por 0,5×ATR, desenhados no gráfico (R/S × nº de toques); o espaço até o nível oposto é uma feature do meta-modelo do v2.
+- **Catalogador em segundo plano:** para cada par e expiração, regras (hora, dia, padrão de vela, indicadores) achadas em 70% do histórico e conferidas nos 30% restantes (Bonferroni), refeitas a cada 6 h. Cada sinal mostra se o catálogo **concorda/discorda**; opção de bloquear discordância ou exigir concordância. As estatísticas por concordância (`/api/signals` → `porCatalogo`) dizem se o filtro melhora o acerto antes de ligá-lo.
+- **Histórico no gráfico:** sinais anteriores do par marcados nas velas (✓ favorável, ✗ desfavorável).
+- **Motor de análise multimétodo (`server/analysis.js`, velas fechadas, sem dados futuros):** anatomia da vela (corpo, pavios, posição do fechamento, amplitude em ATR); indicadores EMA 9/21/50/200, ADX 14 (Wilder), RSI 14, MACD, Bollinger, ATR com aquecimento validado; padrões (engolfo, martelo, estrela, doji, harami, rejeição com pavio em suporte/resistência, vela de impulso); **zonas** de S/R (limites, toques, idade, relevância, estado: aproximando/rejeitando/rompendo); **regime A–G** (reversão de alta/baixa, continuação de alta/baixa, lateral, rompimento não confirmado, inadequado).
+  - **Bloqueios (cada um desligável):** integridade dos dados (OHLC inválido, duplicadas, fora de ordem, lacuna intradiária), histórico mínimo, movimento estendido, lateral (ADX < 15), conflito com a tendência ou rompimento não confirmado, pouco espaço até S/R (< 0,5×ATR), volatilidade muito baixa.
+  - Cada sinal mostra contexto, padrão, S/R, indicadores, fatores **a favor/contra** e bloqueios, e é gravado com a auditoria completa. Decisões **bloqueadas** também são gravadas e avaliadas (ficam fora da taxa de acerto principal) para medir se cada filtro ajuda.
+  - **Backtest v2** passa a reportar: referência simples (seguir a cor da última vela), v1, v2, **v3 = v2 + bloqueios** (é o v3 que é aprovado e vai ao vivo), resultados por regime, acerto que os bloqueados teriam e estabilidade por janela.
+  - Não implementado (sem fonte verificada/autorizada): calendário econômico; spread não se aplica a Rise/Fall (o custo está no payout, que é medido); multi-timeframe como confirmação não foi adicionado porque não há evidência de ganho — os gráficos de 5 e 15 min são avaliados como combinações separadas no scanner.
+- **Celular e tablet:** em retrato, banner do sinal fixo no topo + gráfico + abas (Sinal, Scanner, Análise, Dados, Ajustes); em paisagem, gráfico à esquerda e sinal/abas à direita. Contagem regressiva para o fechamento da vela no gráfico e no banner. Para abrir no celular, use o túnel descrito abaixo (o servidor só escuta em 127.0.0.1).
+- **Desempenho:** processamento por tick e atraso do servidor (p99) medidos e exibidos em Dados; modelo atualizado de forma incremental no fechamento da vela (~0,7 ms em vez de ~50 ms); catálogos calculados em thread separada (não seguram o recebimento de ticks).
 - **Ciclo do sinal:** válido → expirado (janela de entrada acabou) ou invalidado (com motivo). Tudo gravado em `data/signals.json` com ativo, timeframe, expiração, estratégia, horário e idade do dado.
 - **Resultado observado:** após a vela de expiração fechar, compara fechamento vs. preço de abertura do sinal (favorável / desfavorável / empate). Nunca usa dados futuros.
 - **Alertas no Windows** (notificação do navegador + som) para sinal, invalidação, dados atrasados e retomada. Permita notificações quando o navegador pedir.
 - **Segundo plano:** o monitor roda na janela do `iniciar.bat`; pode fechar/minimizar o navegador. Para os alertas do Windows, mantenha ao menos uma aba aberta (pode ficar minimizada). Fechar a janela do monitor, desligar ou suspender o PC para tudo.
+
+**Resultados com dados e preços reais da Deriv (27/10/2026; walk-forward, correção para múltiplos testes)**
+- Forex Rise/Fall 15 min (10 pares, payout real ~78%, empate ~56%): v3 50,3% em 1.039 operações — nenhuma combinação aprovada.
+- Rise/Fall em ouro, prata, 6 índices de ações e forex 60 min (payout 67–82%): nenhuma aprovada.
+- Multiplicadores (BTC, ETH, ouro, prata, EUR/USD, GBP/USD, USD/JPY; comissão real): média por operação negativa em todos (≈ −comissão), igual a "sempre comprar".
+- Contratos com barreira de 1 dia (Higher/Lower, Touch/No Touch, Ends/Stays In/Out; 35 h até o fim do dia seguinte): nenhum acima do preço da Deriv. A 1ª rodada (vela de 24 h) mostrava falsas vantagens em RANGE/NOTOUCH — erro de simulação, corrigido.
+- Índices sintéticos (Volatility, dígitos etc.): gerados por sorteio; sem vantagem possível.
+Scripts: `npm run backtest2`, `node scripts/backtest-contratos.js [1,2,3]`, `node scripts/discover.js`.
 
 **O que o MVP NÃO faz (honestamente)**
 - **IQ Option:** sem API pública oficial; não implementado. O app não usa senha, cookies nem endpoints privados.
@@ -28,7 +54,7 @@ Monitor de mercado para **decisão manual**: o app mostra o gráfico, emite CALL
 - **Celular:** sem push. Acesso remoto só via túnel (ver seção Cloudflare abaixo); o monitor depende do PC ligado.
 - Sinais vêm de regras de indicadores (`indicadores-v1`) sem vantagem comprovada. Nada aqui é promessa de lucro ou taxa de acerto.
 
-**Testes:** `npm test` (25 testes; usam um servidor Deriv **simulado** — validam a lógica, não a integração real).
+**Testes:** `npm test` (50 testes; usam um servidor Deriv **simulado** — validam a lógica, não a integração real).
 
 ---
 

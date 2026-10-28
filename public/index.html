@@ -2,7 +2,8 @@
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0e1116">
 <title>Trade AI Core</title>
 <style>
 :root{
@@ -24,6 +25,8 @@ nav button.on{background:var(--panel2);color:var(--text)}
 .acct.demo{border-color:#2b4a8a} .acct.real{border-color:var(--real);background:#2a1517}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--mute)} .dot.ok{background:var(--up)} .dot.bad{background:var(--down)}
 .tag{font-size:11px;padding:2px 7px;border-radius:6px;background:var(--line);color:var(--mute)}
+.tag#cdown{font-size:13px;font-weight:700;color:var(--text);background:var(--panel2);border:1px solid var(--line);font-variant-numeric:tabular-nums}
+.tag#cdown.soon{color:#ffd666;border-color:#ffd666}
 .tag.demo{background:#1d3566;color:#9db9f5} .tag.real{background:var(--real);color:#fff}
 main{padding:14px 16px;max-width:1500px;margin:0 auto}
 .view{display:none} .view.on{display:block}
@@ -33,7 +36,7 @@ main{padding:14px 16px;max-width:1500px;margin:0 auto}
 .card h3{margin:0 0 10px;font-size:12px;text-transform:uppercase;letter-spacing:.8px;color:var(--mute);font-weight:600}
 .bar{display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
 select,input[type=number],input[type=text],input[type=password]{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;outline:none;width:100%}
-select{width:auto} input:focus,select:focus{border-color:var(--accent)}
+select{width:auto;max-width:100%} #catFilter{width:100%} input:focus,select:focus{border-color:var(--accent)}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
 .seg button{background:var(--panel2);border:0;padding:7px 14px;cursor:pointer;color:var(--mute)}
 .seg button.on{background:var(--accent);color:#fff}
@@ -72,6 +75,10 @@ th{color:var(--mute);font-weight:500;font-size:12px} td.num,th.num{text-align:ri
 .warnbox{border:1px solid var(--warn);background:#2a2110;color:#f3d28a;border-radius:8px;padding:10px 12px;font-size:12.5px;line-height:1.5}
 #toast{position:fixed;right:16px;bottom:16px;display:flex;flex-direction:column;gap:8px;z-index:20}
 #toast div{background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--accent);padding:10px 14px;border-radius:8px;max-width:360px}
+.opp{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;background:var(--panel2);margin-top:6px;border-left:4px solid var(--mute)}
+.opp.call{border-left-color:#26a69a} .opp.put{border-left-color:#ef5350} .opp.conf{outline:2px solid #ffd666}
+.opp b{min-width:64px} .opp .go{margin-left:auto;width:auto;padding:6px 14px}
+#toast div.act{cursor:pointer;border-left-color:#ffd666;font-weight:600} #toast div.act:hover{filter:brightness(1.2)}
 #toast div.error{border-left-color:var(--down)} #toast div.ok{border-left-color:var(--up)} #toast div.warn{border-left-color:var(--warn)}
 .modal{position:fixed;inset:0;background:#000a;display:none;align-items:center;justify-content:center;z-index:30}
 .modal.on{display:flex} .modal .box{background:var(--panel);border:1px solid var(--real);border-radius:12px;padding:20px;max-width:420px}
@@ -79,14 +86,51 @@ details summary{cursor:pointer;color:var(--mute);font-size:12px;text-transform:u
 .log{font-size:12px;color:var(--mute);max-height:120px;overflow:auto;margin-top:8px}
 .log div{padding:2px 0} .log .error{color:var(--down)} .log .ok{color:var(--up)} .log .warn{color:var(--warn)}
 .conn{max-width:520px;margin:20px auto}
+
+/* ---------- telas pequenas: tudo essencial numa tela; o resto em abas ---------- */
+#mtabs{display:none} #modeTag{display:none}
+@media (max-width:1000px) and (orientation:portrait), (max-height:520px) and (orientation:landscape){
+  header{padding:6px 10px;gap:8px} header nav{display:none} .brand{font-size:13px} .pill{padding:4px 9px;font-size:12px}
+  main{padding:6px 6px calc(56px + env(safe-area-inset-bottom))}
+  .card{padding:10px;margin-top:0 !important;border-radius:8px}
+  .card h3{margin-bottom:6px}
+  [data-sec]{display:none}
+  body[data-tab="sinal"] [data-sec="sinal"], body[data-tab="scanner"] [data-sec="scanner"], body[data-tab="analise"] [data-sec="analise"],
+  body[data-tab="dados"] [data-sec="dados"], body[data-tab="ajustes"] [data-sec="ajustes"]{display:block}
+  #colL,#colR{display:contents}
+  .bar{gap:6px;margin-bottom:6px} .bar select{padding:6px 8px} .seg button{padding:6px 10px} #clock{display:none} #bestTag{order:9;flex-basis:100%;text-align:center}
+  .big{padding:8px 10px;margin:0;border-width:2px;border-radius:10px}
+  .big .t{font-size:26px} .big .p{font-size:15px;margin-top:2px} .big .s{font-size:12px;margin-top:3px} .big .cd{font-size:20px;margin-top:2px}
+  #mtabs{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:15;background:var(--panel);border-top:1px solid var(--line);padding:4px 4px calc(4px + env(safe-area-inset-bottom))}
+  #mtabs button{flex:1;background:none;border:0;color:var(--mute);padding:10px 2px;border-radius:8px;font-size:12.5px;cursor:pointer}
+  #mtabs button.on{background:var(--panel2);color:var(--text);font-weight:600}
+  #toast{left:8px;right:8px;bottom:calc(62px + env(safe-area-inset-bottom))} #toast div{max-width:none}
+  .btn{padding:10px 8px}
+  #modeBanner{display:none !important} #modeTag{display:inline-block}
+}
+@media (max-width:1000px) and (orientation:portrait){
+  .grid{display:flex;flex-direction:column;gap:6px}
+  #bigWrap{order:1;position:sticky;top:0;z-index:10;background:var(--bg);padding-bottom:4px}
+  #chartCard{order:2} #chart{height:34vh;min-height:170px}
+  [data-sec]{order:3}
+}
+@media (max-height:520px) and (orientation:landscape){
+  .grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(250px,40%);gap:6px;align-items:start}
+  #chartCard{grid-column:1;grid-row:1 / span 30;position:sticky;top:0}
+  #chart{height:calc(100vh - 178px - env(safe-area-inset-bottom));min-height:140px}
+  #bigWrap,[data-sec]{grid-column:2}
+  #bigWrap{position:sticky;top:0;z-index:10;background:var(--bg)}
+  .big .t{font-size:22px}
+}
 </style>
 </head>
 <body>
 <header>
   <div class="brand">Trade AI <span>Core</span></div>
+  <span class="tag" id="modeTag" title="O app não envia ordens">só análise</span>
   <nav id="nav">
     <button data-v="trade" class="on">Painel</button>
-    <button data-v="catalog">Catálogo</button>
+    <button data-v="catalog" style="display:none">Catálogo</button>
     <button data-v="history">Histórico</button>
     <button data-v="conn">Conexão</button>
   </nav>
@@ -99,31 +143,42 @@ details summary{cursor:pointer;color:var(--mute);font-size:12px;text-transform:u
 <!-- OPERAR -->
 <section class="view on" id="v-trade">
   <div class="grid">
-    <div>
-      <div class="card">
+    <div id="colL">
+      <div class="card" id="chartCard">
         <div class="bar">
           <select id="symbol">
-            <option value="R_100">Volatility 100</option><option value="R_75">Volatility 75</option>
-            <option value="R_50">Volatility 50</option><option value="R_25">Volatility 25</option><option value="R_10">Volatility 10</option>
-            <option value="frxEURUSD">EUR/USD</option><option value="frxGBPUSD">GBP/USD</option><option value="frxUSDJPY">USD/JPY</option>
+            <option value="frxEURUSD">EUR/USD</option><option value="frxGBPUSD">GBP/USD</option><option value="frxUSDJPY">USD/JPY</option><option value="frxAUDUSD">AUD/USD</option><option value="frxUSDCAD">USD/CAD</option><option value="frxUSDCHF">USD/CHF</option><option value="frxNZDUSD">NZD/USD</option><option value="frxEURGBP">EUR/GBP</option><option value="frxEURJPY">EUR/JPY</option><option value="frxGBPJPY">GBP/JPY</option>
           </select>
-          <div class="seg" id="tf"><button data-tf="5m" class="on">5 min</button><button data-tf="15m">15 min</button><button data-tf="1h">1 hora</button></div>
+          <div class="seg" id="tf"><button data-tf="15m" class="on">15 min</button><button data-tf="1h">1 hora</button></div>
           <span class="sp"></span>
+          <span class="tag" id="bestTag" title="Melhor par pelo backtest (pior caso do acerto − empate)" style="cursor:pointer">melhor par —</span>
+          <span class="tag" id="cdown" title="Tempo até o fechamento da vela atual">fecha em —</span>
           <span class="tag" id="clock">—</span>
         </div>
         <div id="chart"></div>
       </div>
+      <div class="card" data-sec="scanner" style="margin-top:14px">
+        <h3>Scanner — probabilidade de entrada em todos os mercados</h3>
+        <div class="hint" id="scanSum">Iniciando scanner…</div>
+        <div id="scanList"></div>
+        <p class="hint">Mesmo modelo e mesmos filtros do painel. Clique em <b>Ir</b> para abrir o mercado; a confirmação chega no fechamento da vela.</p>
+      </div>
       <div id="openBox"></div>
-      <div class="card" style="margin-top:14px">
+      <div class="card" data-sec="dados" style="margin-top:14px">
         <h3>Registro</h3>
         <div class="log" id="log"></div>
       </div>
     </div>
 
-    <div>
-      <div class="card">
-        <div class="big wait" id="big"><div class="t">AGUARDAR</div><div class="s">Carregando…</div></div>
+    <div id="colR">
+      <div id="bigWrap"><div class="big wait" id="big"><div class="t">AGUARDAR</div><div class="s">Carregando…</div></div></div>
+      <div class="card" data-sec="sinal">
+        <div class="row" style="gap:8px;margin-bottom:8px"><button class="btn up" id="inCall">Entrei CALL ▲</button><button class="btn down" id="inPut">Entrei PUT ▼</button></div>
+        <div id="posBox"></div>
+        <div id="bestBox" class="card" style="margin-bottom:10px;padding:10px"><b>Melhor par</b><div class="hint">Carregando…</div></div>
         <div class="warnbox" id="modeBanner" style="margin-bottom:10px">MODO SÓ ANÁLISE — o app não envia ordens. Você decide e opera manualmente na corretora.</div>
+        <h3>Fluxo de ticks (tape)</h3>
+        <div id="flowBox" class="hint">Aguardando ticks…</div>
         <h3>Probabilidade ao vivo</h3>
         <div id="prob" class="hint">Carregando histórico da Deriv para o modelo…</div>
         <div class="row" style="margin-top:8px;gap:8px">
@@ -132,11 +187,16 @@ details summary{cursor:pointer;color:var(--mute);font-size:12px;text-transform:u
         </div>
         <h3 style="margin-top:14px">Sinal para a próxima vela</h3>
         <label>Expiração pretendida (independente do timeframe)</label>
-        <div class="seg" id="exp" style="width:100%"><button data-e="5" class="on" style="flex:1">5 min</button><button data-e="15" style="flex:1">15 min</button></div>
+        <div class="seg" id="exp" style="width:100%"><button data-e="15" class="on" style="flex:1">15 min</button><button data-e="60" style="flex:1">60 min</button></div>
         <div class="signal" id="signal"><div class="none">Sem sinal confirmado — AGUARDAR</div></div>
       </div>
 
-      <div class="card" style="margin-top:14px">
+      <div class="card" data-sec="analise" style="margin-top:14px">
+        <h3>Análise da vela fechada</h3>
+        <div id="anBox" class="hint"></div>
+      </div>
+
+      <div class="card" data-sec="dados" style="margin-top:14px">
         <h3>Diagnóstico da fonte</h3>
         <div class="stat"><span>Fonte</span><b id="dSrc">—</b></div>
         <div class="stat"><span>Mercado</span><b id="dMkt">—</b></div>
@@ -145,6 +205,8 @@ details summary{cursor:pointer;color:var(--mute);font-size:12px;text-transform:u
         <div class="stat"><span>Último preço</span><b id="dPrice">—</b></div>
         <div class="stat"><span>Atraso do tick (≈, resolução 1 s)</span><b id="dTick">—</b></div>
         <div class="stat"><span>Modelo</span><b id="dModel">—</b></div>
+        <div class="stat"><span>Processamento por tick (médio / máx 10 s)</span><b id="dProc">—</b></div>
+        <div class="stat"><span>Atraso do servidor (p99)</span><b id="dLag">—</b></div>
         <div class="stat"><span>Sincronização com o gráfico da corretora</span><b>Não validada</b></div>
         <p class="hint" id="dBlock"></p>
         <p class="hint">Não há acesso programático ao OHLC exibido pela corretora; compare visualmente. Sinais só são emitidos com dados frescos da Deriv.</p>
@@ -152,7 +214,22 @@ details summary{cursor:pointer;color:var(--mute);font-size:12px;text-transform:u
         <label style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="checkbox" id="nOn" checked style="width:auto"> Alertas do Windows + som</label>
       </div>
 
-      <div class="card" style="margin-top:14px">
+      <div class="card" data-sec="ajustes" style="margin-top:14px">
+        <h3>Qualidade — backtest v2</h3>
+        <div id="rsSum" class="hint">Sem backtest v2 ainda: valendo a regra v1.</div>
+        <button class="btn primary" id="rsRun" style="margin-top:10px">Rodar backtest v2 (dados reais)</button>
+        <label>Margem mínima sobre o empate (p.p.)</label><input type="number" id="edgeMargin" min="0" max="20" step="0.5" value="2">
+        <label>Catalogador (regras do histórico, refeitas a cada 6 h)</label>
+        <select id="catFilter"><option value="0">Só informar concordância (recomendado até medir)</option><option value="1">Bloquear quando o catálogo discordar</option><option value="2">Exigir concordância do catálogo</option></select>
+        <details style="margin-top:10px"><summary>Motor de análise e bloqueios</summary>
+          <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="anOn" style="width:auto"> Motor de análise ligado (bloqueia CALL/PUT em condições desfavoráveis)</label>
+          <div id="fBox"></div>
+          <p class="hint">Os bloqueados ficam registrados com o resultado que teriam; o backtest compara v2 (sem bloqueios) e v3 (com bloqueios).</p>
+        </details>
+        <label style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="checkbox" id="allowUn" style="width:auto"> Avisar também combinações NÃO aprovadas (mais operações, sem vantagem comprovada)</label>
+      </div>
+
+      <div class="card" data-sec="dados" style="margin-top:14px">
         <h3>Sinais registrados</h3>
         <div class="stat"><span>Avaliados · favoráveis</span><b id="sigStat">—</b></div>
         <p class="hint">Resultado = fechamento da vela de expiração vs. preço de abertura do sinal. Histórico não garante resultado futuro.</p>
@@ -188,6 +265,9 @@ details summary{cursor:pointer;color:var(--mute);font-size:12px;text-transform:u
       </div>
     </div>
   </div>
+  <nav id="mtabs" aria-label="Seções">
+    <button data-t="sinal" class="on">Sinal</button><button data-t="scanner">Scanner</button><button data-t="analise">Análise</button><button data-t="dados">Dados</button><button data-t="ajustes">Ajustes</button>
+  </nav>
 </section>
 
 <!-- CATÁLOGO -->
@@ -272,11 +352,38 @@ const chart = LightweightCharts.createChart($('#chart'), {
   crosshair: { mode: 0 },
 });
 const series = chart.addCandlestickSeries({ upColor: '#26a69a', downColor: '#ef5350', borderVisible: false, wickUpColor: '#26a69a', wickDownColor: '#ef5350' });
-new ResizeObserver(() => chart.applyOptions({ width: $('#chart').clientWidth })).observe($('#chart'));
+new ResizeObserver(() => chart.applyOptions({ width: $('#chart').clientWidth, height: $('#chart').clientHeight })).observe($('#chart'));
 let priceLine = null;
 
+let srLines = [], histMarks = [], posLines = [], precision = 5;
+const fp = v => (v == null ? '—' : (+v).toFixed(precision));
+function setPrecision(cs) {
+  const dec = v => { const t = String(v); const k = t.indexOf('.'); return k < 0 ? 0 : t.length - k - 1; };
+  let d = 0; for (const c of cs.slice(-60)) d = Math.max(d, dec(c.open), dec(c.high), dec(c.low), dec(c.close));
+  precision = Math.min(6, Math.max(2, d));
+  series.applyOptions({ priceFormat: { type: 'price', precision, minMove: 1 / 10 ** precision } });
+}
+function drawLevels(lv) {
+  for (const l of srLines) series.removePriceLine(l); srLines = [];
+  if (!lv || !lv.levels) return;
+  for (const l of lv.levels) srLines.push(series.createPriceLine({ price: l.price, color: l.type === 'resistencia' ? 'rgba(239,83,80,.75)' : 'rgba(38,166,154,.75)', lineWidth: 1, lineStyle: 1,
+    axisLabelVisible: true, title: (l.type === 'resistencia' ? 'R' : 'S') + ' ×' + l.touches }));
+}
+async function loadHistMarks() {
+  if (!S) return;
+  try {
+    const r = await (await fetch('/api/signals')).json();
+    histMarks = r.signals.filter(x => x.symbol === S.symbol && x.tf === S.tf && x.status !== 'valido').slice(-60).map(x => {
+      const up = x.direction === 'CALL', ok = x.outcome === 'favorável', bad = x.outcome === 'desfavorável';
+      return { time: x.candleOpen, position: up ? 'belowBar' : 'aboveBar', shape: up ? 'arrowUp' : 'arrowDown',
+        color: ok ? '#26a69a' : bad ? '#ef5350' : '#8a94a6', text: (ok ? '✓' : bad ? '✗' : x.status === 'invalidado' ? 'inv' : '…') };
+    });
+    drawMarkers();
+  } catch {}
+}
 function drawMarkers() {
-  const m = [];
+  const known = new Set(candles.map(c => c.epoch));
+  const m = histMarks.filter(x => known.has(x.time));
   if (signal && now() < signal.expiresAt) {
     const up = signal.direction === 'CALL';
     m.push({ time: signal.candleOpen, position: up ? 'belowBar' : 'aboveBar', color: up ? '#26a69a' : '#ef5350', shape: up ? 'arrowUp' : 'arrowDown',
@@ -286,8 +393,16 @@ function drawMarkers() {
     const up = open.direction === 'CALL';
     m.push({ time: open.candleOpen, position: 'inBar', color: '#4c8dff', shape: 'circle', text: 'ENTRADA ' + (up ? '▲' : '▼') });
   }
+  const mine = S ? positions.filter(p => p.symbol === S.symbol) : [];
+  for (const p of mine) {
+    const g = ({ '15m': 900, '1h': 3600 })[S.tf] || 900, t = Math.floor(p.entryAt / g) * g, up = p.direction === 'CALL';
+    if (known.has(t)) m.push({ time: t, position: up ? 'belowBar' : 'aboveBar', color: '#ffd666', shape: up ? 'arrowUp' : 'arrowDown', text: (up ? 'CALL' : 'PUT') + ' ' + fp(p.entryPrice) });
+  }
   m.sort((a, b) => a.time - b.time);
   series.setMarkers(m);
+  for (const l of posLines) series.removePriceLine(l); posLines = [];
+  mine.forEach((p, k) => posLines.push(series.createPriceLine({ price: p.entryPrice, color: p.status === 'ABANDONAR' ? '#ef5350' : p.direction === 'CALL' ? '#ffd666' : '#ffb84d',
+    lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title: `#${k + 1} ${p.direction}` })));
   if (priceLine) { series.removePriceLine(priceLine); priceLine = null; }
   if (open && open.entrySpot) priceLine = series.createPriceLine({ price: open.entrySpot, color: '#4c8dff', lineWidth: 1, lineStyle: 2, title: 'entrada' });
 }
@@ -296,7 +411,7 @@ function drawMarkers() {
 const on = {
   state(s) {
     S = s; offset = s.serverNow - Date.now() / 1000;
-    $('#dot').className = 'dot ' + (s.connected ? 'ok' : 'bad');
+    $('#dot').className = 'dot ' + (s.dataState === 'ok' ? 'ok' : 'bad');   // estado real da fonte de dados
     $('#lat').textContent = s.latency != null ? s.latency + ' ms' : '—';
     if (s.account) {
       const demo = s.account.type === 'demo';
@@ -317,23 +432,34 @@ const on = {
     renderOpen(); renderSignal(); renderCatalogSub();
     document.querySelectorAll('.trading-only, #acct, [data-v="conn"], [data-v="history"]').forEach(e => e.style.display = s.tradingEnabled ? '' : 'none');
     $('#modeBanner').style.display = s.tradingEnabled ? 'none' : '';
-    document.querySelectorAll('#exp button').forEach(b => b.classList.toggle('on', +b.dataset.e === s.cfg.expiryMin));
+    document.querySelectorAll('#exp button').forEach(b => { const ok = !s.allowedExpiries || s.allowedExpiries.includes(+b.dataset.e); b.disabled = !ok; b.title = ok ? '' : 'A Deriv não oferece esta expiração neste mercado'; b.style.opacity = ok ? '' : '.35'; b.classList.toggle('on', +b.dataset.e === s.cfg.expiryMin); });
+    if (document.activeElement !== $('#edgeMargin')) $('#edgeMargin').value = (s.cfg.edgeMargin * 100).toFixed(1);
+    $('#allowUn').checked = !!s.cfg.allowUnapproved;
+    if (document.activeElement !== $('#catFilter')) $('#catFilter').value = String(s.cfg.catalogFilter || 0);
     if (document.activeElement !== $('#maxAge')) $('#maxAge').value = s.cfg.maxDataAgeSec;
     $('#dSrc').textContent = s.source; $('#dMkt').textContent = s.symbol + ' · ' + s.market + ' · ' + s.tf;
     const lbl = { ok: '● OK', desatualizado: '▲ DESATUALIZADO', desconectado: '✕ DESCONECTADO' };
     $('#dState').textContent = lbl[s.dataState] || s.dataState; $('#dState').className = s.dataState === 'ok' ? 'pos' : 'neg';
     $('#dTick').textContent = s.tickLatencyMs == null ? '—' : s.tickLatencyMs + ' ms';
+    if (s.perf) { $('#dProc').textContent = s.perf.tickMsAvg == null ? '—' : `${s.perf.tickMsAvg} / ${s.perf.tickMsMax} ms`; $('#dLag').textContent = s.perf.loopLagP99Ms == null ? '—' : s.perf.loopLagP99Ms + ' ms'; }
     $('#dModel').textContent = s.model ? `${s.model.samples} amostras · ${s.model.horizon} vela(s)` : 'indisponível';
     for (const [id, k, f] of [['minProb', 'minProb', 100], ['minSamples', 'minSamples', 1]]) if (document.activeElement !== $('#' + id)) $('#' + id).value = Math.round(s.cfg[k] * f);
+    { const k = posKey(); positions = s.positions || []; renderPos(); if (k !== posKey()) drawMarkers(); }
+    drawLevels(s.levels); renderFlow(s.flow); renderAnalysis(); renderFilters();
     if (s.prob) renderProb(s.prob);
     $('#dPrice').textContent = s.lastPrice == null ? '—' : (+s.lastPrice).toFixed(5);
     $('#dBlock').textContent = s.blockReason ? 'Sinais suspensos: ' + s.blockReason : '';
     ageBase = s.dataAgeMs == null ? null : Date.now() - s.dataAgeMs;
     if (!s.connected && !s.tradingEnabled) {} else if (!s.connected && s.tradingEnabled) switchView('conn');
   },
-  candles(d) { candles = d.candles; series.setData(candles.map(c => ({ time: c.epoch, open: c.open, high: c.high, low: c.low, close: c.close }))); chart.timeScale().scrollToRealTime(); drawMarkers(); },
+  candles(d) { candles = d.candles; setPrecision(candles); series.setData(candles.map(c => ({ time: c.epoch, open: c.open, high: c.high, low: c.low, close: c.close }))); chart.timeScale().scrollToRealTime(); drawMarkers(); loadHistMarks(); },
   candle(c) { ageBase = Date.now(); series.update({ time: c.epoch, open: c.open, high: c.high, low: c.low, close: c.close }); },
   prob(p) { renderProb(p); },
+  opportunity(o) { onOpportunity(o); loadSignals(); },
+  scan(l) { renderScan(l); },
+  flow(f) { renderFlow(f); },
+  positions(ps) { const k = posKey(); positions = ps || []; renderPos(); renderBig(); if (k !== posKey()) drawMarkers(); },
+  research() { loadResearch(); },
   notify(n) { notifyUser(n); loadSignals(); },
   signal(s) { signal = s && s.status === 'valido' ? s : null; renderBig(); renderSignal(); drawMarkers(); if (s && s.status === 'valido') toast(`Sinal ${s.direction === 'CALL' ? 'de COMPRA' : 'de VENDA'}${s.confidence != null ? ' · ' + Math.round(s.confidence * 100) + '%' : ''}`, s.direction === 'CALL' ? 'ok' : 'warn'); },
   trade_open(o) { open = o; renderOpen(); drawMarkers(); },
@@ -349,7 +475,7 @@ const on = {
 
 // ---------- Renderização ----------
 function renderProb(p) {
-  lastProb = p; renderBig();
+  lastProb = p; renderBig(); renderAnalysis();
   const el = $('#prob');
   if (!p || p.pCall == null) { el.innerHTML = `<b>AGUARDAR</b> — ${esc((p && p.reason) || 'sem estimativa')}`; return; }
   const c = Math.round(p.pCall * 1000) / 10, v = Math.round(p.pPut * 1000) / 10;
@@ -358,12 +484,66 @@ function renderProb(p) {
       <div style="width:${c}%;background:#26a69a;display:flex;align-items:center;padding-left:6px">CALL ${c}%</div>
       <div style="width:${v}%;background:#ef5350;display:flex;align-items:center;justify-content:flex-end;padding-right:6px">PUT ${v}%</div></div>
     <div style="margin-top:6px"><b>${tag}</b></div>
+    <div>${p.version === 'v2' ? `Regra v2 · prob. final <b>${(p.p * 100).toFixed(1)}%</b> ${p.direction} · VE ${p.ev != null ? (p.ev * 100).toFixed(1) + '%' : '—'} · ${p.approved ? '<b>APROVADA</b>' : 'não aprovada'}` : (p.version === 'v1' ? 'Regra v1 (rode o backtest v2)' : '')}</div>
+    ${p.catalog ? `<div>Catálogo: <b>${esc(p.catalog.status)}</b>${p.catalog.best ? ` · ${esc(p.catalog.best.regra)} (${(p.catalog.best.acertoTeste * 100).toFixed(0)}% em ${p.catalog.best.casos})` : ''}</div>` : ''}
     <div>${p.n} casos semelhantes · nível: ${esc(p.level)} · IC95% ${(p.lo * 100).toFixed(1)}–${(p.hi * 100).toFixed(1)}%</div>
     ${p.stage === 'AGUARDAR' ? `<div>Motivo: ${esc(p.reason || '')}</div>` : ''}
     <div>Horizonte: ${p.horizon} vela(s) · estimativa estatística do histórico, não garantia.</div>`;
 }
 let lastProb = null;
+let positions = [];
+const posKey = () => positions.map(p => p.id + p.status).join('|');
+function renderFlow(f) {
+  const el = $('#flowBox'); if (!f) return; if (f.erro) { el.textContent = f.erro; return; }
+  const bar = (w, nome) => { const up = w.alta + w.baixa ? Math.round(100 * w.alta / (w.alta + w.baixa)) : 50;
+    return `<div style="display:flex;align-items:center;gap:6px;margin-top:4px"><span style="width:42px">${nome}</span>
+      <div style="flex:1;display:flex;height:14px;border-radius:4px;overflow:hidden;font-size:10px;color:#fff"><div style="width:${up}%;background:#26a69a;padding-left:3px">${w.alta}</div><div style="width:${100 - up}%;background:#ef5350;text-align:right;padding-right:3px">${w.baixa}</div></div>
+      <span style="width:62px;text-align:right">${w.porMin}/min</span></div>`; };
+  el.innerHTML = bar(f.w1, '1 min') + bar(f.w5, '5 min') + bar(f.w15, '15 min') + '<div class="hint" style="margin-top:4px">Ticks de alta × de baixa (a Deriv não informa volume). Ver resultado do teste antes de usar.</div>';
+}
+function renderPos() {
+  const el = $('#posBox'); if (!positions.length) { el.innerHTML = ''; return; }
+  const mmss = x => `${Math.floor(x / 60)}:${String(x % 60).padStart(2, '0')}`;
+  el.innerHTML = `<div class="card" style="margin-bottom:10px;padding:10px">
+    <div style="display:flex;justify-content:space-between;align-items:center"><b>Minhas entradas (${positions.length})</b>${positions.length > 1 ? '<button class="btn ghost" id="posAll" style="width:auto;padding:4px 10px">Encerrar todas</button>' : ''}</div>
+    ${positions.map(p => { const left = Math.max(0, Math.round(p.expiresAt - now())), ab = p.status === 'ABANDONAR', fav = (p.move || 0) >= 0;
+      return `<div style="margin-top:8px;padding:8px;border-radius:8px;border:2px solid ${ab ? '#ef5350' : fav ? '#26a69a' : '#3a4456'}">
+        <div style="display:flex;justify-content:space-between;gap:6px"><b style="color:${ab ? '#ef5350' : fav ? '#26a69a' : 'var(--text)'}">${ab ? '✕ ABANDONAR' : '✓ MANTER'} · ${p.direction} ${esc(p.name || p.symbol)}</b>
+        <button class="btn ghost" data-clr="${p.id}" style="width:auto;padding:2px 8px">×</button></div>
+        <div class="hint" style="margin:2px 0 0">entrada ${fp(p.entryPrice)} · agora ${fp(p.price)} · ${p.tf} · exp. ${p.expiryMin} min · termina em <b>${mmss(left)}</b></div>
+        <div class="hint" style="margin:2px 0 0">${esc(p.reason || '')}</div></div>`; }).join('')}
+    <div class="hint">Regra de abandono não comprovada em backtest; o valor de venda antecipada é o que a Deriv oferecer.</div></div>`;
+  el.querySelectorAll('[data-clr]').forEach(b => b.onclick = () => call('position_clear', { id: b.dataset.clr }).catch(() => {}));
+  if ($('#posAll')) $('#posAll').onclick = () => call('position_clear', {}).catch(() => {});
+}
+const REG = { A: 'A · reversão potencial de alta', B: 'B · reversão potencial de baixa', C: 'C · continuação de alta', D: 'D · continuação de baixa', E: 'E · lateral / sem direção', F: 'F · rompimento não confirmado', G: 'G · inadequado para operar' };
+const FL = { integridade: 'Integridade dos dados', historico: 'Histórico mínimo', estendido: 'Movimento estendido', lateral: 'Mercado lateral (ADX baixo)', conflito: 'Conflito com a tendência / rompimento', espaco: 'Pouco espaço até S/R', baixaVol: 'Volatilidade muito baixa' };
+function renderAnalysis() {
+  const a = S && S.analysis, el = $('#anBox'); if (!a) { el.innerHTML = ''; return; }
+  const dir = lastProb && lastProb.direction, g = dir === 'PUT' ? a.put : a.call;
+  const z = (a.zonas || []).slice(0, 2).map(x => `${x.tipo === 'resistencia' ? 'R' : 'S'} ${x.preco} (${x.toques}×, ${x.distanciaATR}×ATR, ${x.estado})`).join(' · ') || '—';
+  const i = a.indicadores || {};
+  el.innerHTML = `<b>Vela fechada ${hhmm(a.velaFechada)}</b> · contexto: <b>${esc(REG[a.regime] || a.regime || '—')}</b>${a.regimeMotivo ? ' — ' + esc(a.regimeMotivo) : ''}<br>
+    Padrões: ${esc((a.padroes || []).join(', ') || 'nenhum')} · S/R: ${esc(z)}<br>
+    ADX ${i.adx14 ?? '—'} · RSI ${i.rsi14 ?? '—'} · ATR pct ${i.atrPercentil ?? '—'} · EMA200 ${i.ema200 == null ? 'sem histórico' : (a.anatomia.close > i.ema200 ? 'preço acima' : 'preço abaixo')}<br>
+    ${dir ? `Para <b>${dir}</b> — a favor: ${esc((g.favor || []).join('; ') || '—')} · contra: ${esc((g.contra || []).join('; ') || '—')}${g.blocks.length ? `<br><b>Bloqueios:</b> ${esc(g.blocks.join('; '))}` : ''}` : ''}
+    ${(a.problemas || []).length ? `<br><b>Dados:</b> ${esc(a.problemas.join(', '))}` : ''}`;
+}
+function renderFilters() {
+  if (!S || !S.cfg.filters || document.activeElement && document.activeElement.closest && document.activeElement.closest('#fBox')) return;
+  $('#anOn').checked = S.cfg.analise !== 0;
+  $('#fBox').innerHTML = Object.entries(FL).map(([k, n]) => `<label style="display:flex;gap:8px;align-items:center;margin:4px 0"><input type="checkbox" data-f="${k}" style="width:auto" ${S.cfg.filters[k] ? 'checked' : ''}> ${n}</label>`).join('');
+  $('#fBox').querySelectorAll('input').forEach(x => x.onchange = () => call('config', { filters: { [x.dataset.f]: x.checked ? 1 : 0 } }).catch(() => {}));
+}
+function renderCountdown() {
+  if (!S) return;
+  const g = ({ '15m': 900, '1h': 3600 })[S.tf] || 900, t = now(), left = Math.max(0, Math.ceil(Math.floor(t / g) * g + g - t));
+  const el = $('#cdown'); el.textContent = `fecha em ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`; el.classList.toggle('soon', left <= 30);
+  const w = $('#big .cdw'); if (w) w.textContent = `vela fecha em ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+}
 function renderBig() {
+  const abd = positions.find(p => p.status === 'ABANDONAR');
+  if (abd) { const b = $('#big'); b.className = 'big put'; b.innerHTML = `<div class="t">ABANDONAR ✕</div><div class="s">${esc(abd.direction)} ${esc(abd.name || abd.symbol)} — ${esc(abd.reason)}</div>`; return; }
   const el = $('#big'), t = now(), mmss = x => { x = Math.max(0, Math.round(x)); return Math.floor(x / 60) + ':' + String(x % 60).padStart(2, '0'); };
   const pct = x => (x * 100).toFixed(1) + '%';
   if (signal && signal.status === 'valido' && t < signal.expiresAt) {
@@ -374,7 +554,7 @@ function renderBig() {
       <div class="cd">${mmss(signal.expiresAt - t)}</div><div class="s">tempo restante para entrar</div>`;
     return;
   }
-  const p = lastProb, g = S ? ({ '5m': 300, '15m': 900, '1h': 3600 })[S.tf] : 300;
+  const p = lastProb, g = S ? ({ '15m': 900, '1h': 3600 })[S.tf] : 900;
   const close = p && p.candle ? p.candle + g : null;
   if (p && p.stage === 'preliminar' && p.pCall != null) {
     el.className = 'big pre';
@@ -384,7 +564,61 @@ function renderBig() {
   }
   el.className = 'big wait';
   const why = !S ? 'conectando…' : S.dataState !== 'ok' ? 'dados ' + S.dataState : (p && p.reason) || 'sem vantagem estatística';
-  el.innerHTML = `<div class="t">AGUARDAR</div>${p && p.pCall != null ? `<div class="p">CALL ${pct(p.pCall)} · PUT ${pct(p.pPut)}</div>` : ''}<div class="s">${esc(why)}</div>`;
+  el.innerHTML = `<div class="t">AGUARDAR</div>${p && p.pCall != null ? `<div class="p">CALL ${pct(p.pCall)} · PUT ${pct(p.pPut)}</div>` : ''}<div class="s">${esc(why)}</div><div class="s cdw"></div>`; renderCountdown();
+}
+const TFL = { '15m': '15 min', '1h': '1 hora' };
+function oppText(o) { return `${o.name} · gráfico ${TFL[o.tf]} · expiração ${o.expiryMin} min · ${o.direction} ${(o.p * 100).toFixed(1)}%${o.catalog ? ' · catálogo ' + o.catalog : ''}`; }
+function gotoOpp(o) {
+  if (!$('#symbol').querySelector(`option[value="${o.symbol}"]`)) { const op = document.createElement('option'); op.value = o.symbol; op.textContent = o.name || o.symbol; $('#symbol').append(op); }
+  call('goto', { symbol: o.symbol, tf: o.tf, expiryMin: o.expiryMin }).then(() => { switchView('trade'); setTab('sinal'); window.scrollTo({ top: 0, behavior: 'smooth' }); toast('Painel em ' + o.name + ' · ' + TFL[o.tf] + ' · exp. ' + o.expiryMin + ' min', 'ok'); }).catch(() => {});
+}
+function actionToast(msg, fn) { const d = document.createElement('div'); d.className = 'act'; d.textContent = msg + '  → clique para ir'; d.onclick = () => { fn(); d.remove(); }; $('#toast').append(d); setTimeout(() => d.remove(), 20000); }
+function onOpportunity(o) {
+  const head = o.stage === 'confirmado' ? 'ENTRE AGORA (confirmado)' : 'Probabilidade de entrada';
+  const text = `${head}: ${oppText(o)}`;
+  if ($('#nOn').checked) beep(o.stage === 'confirmado' ? 988 : 660);
+  if ($('#nOn').checked && 'Notification' in window && Notification.permission === 'granted') {
+    const n = new Notification('Trade AI Core — ' + head, { body: oppText(o) + (o.stage === 'confirmado' ? '\nJanela de entrada curta.' : '\nClique para abrir este mercado.'), tag: o.symbol + o.tf + o.expiryMin + o.stage, requireInteraction: true });
+    n.onclick = () => { window.focus(); gotoOpp(o); n.close(); };
+  }
+  actionToast(text, () => gotoOpp(o));
+}
+function renderScan(list) {
+  const ready = list.filter(x => x.loaded).length, fresh = list.filter(x => x.fresh).length;
+  $('#scanSum').textContent = `${list.length} combinações monitoradas · ${ready} com modelo pronto · ${fresh} com dados frescos (forex fecha no fim de semana)`;
+  const ok = list.filter(x => x.ok).sort((a, b) => b.p - a.p);
+  $('#scanList').innerHTML = ok.length ? ok.map((x, i) => `<div class="opp ${x.direction === 'CALL' ? 'call' : 'put'} ${x.stage === 'confirmado' ? 'conf' : ''}">
+      <b>${x.direction === 'CALL' ? 'CALL ▲' : 'PUT ▼'}</b><span><b>${esc(x.name)}</b> · ${TFL[x.tf]} · exp. ${x.expiryMin} min<br><span class="hint">${(x.p * 100).toFixed(1)}% · ${x.n} casos · ${x.stage} · ${x.version === 'v2' ? (x.approved ? 'APROVADA' : 'NÃO aprovada') : 'v1'}${x.catalog ? ' · catálogo ' + esc(x.catalog) : ''}</span></span>
+      <button class="btn primary go" data-i="${i}">Ir</button></div>`).join('') : '<div class="hint" style="margin-top:6px">Nenhum mercado com probabilidade suficiente agora — AGUARDAR.</div>';
+  $('#scanList').querySelectorAll('.go').forEach(b => b.onclick = () => gotoOpp(ok[+b.dataset.i]));
+}
+async function loadBest() {
+  try {
+    const b = await (await fetch('/api/best')).json(), pct = x => x == null ? '—' : (x * 100).toFixed(1) + '%';
+    const h = b.historico[0], g = b.agora[0];
+    const linha = (x, i) => `<div style="display:flex;align-items:center;gap:8px;margin-top:6px"><span style="min-width:16px">${i + 1}.</span>
+      <span style="flex:1"><b>${esc(x.name)}</b> · ${TFL[x.tf]} · exp. ${x.expiryMin} min<br><span class="hint" style="margin:0">histórico ${pct(x.acerto)} em ${x.n} op · pior caso ${pct(x.limiteInferior)} vs empate ${pct(x.empate)}${x.aoVivo.n ? ` · ao vivo ${pct(x.aoVivo.acerto)} em ${x.aoVivo.n}` : ''}</span></span>
+      <button class="btn ghost" data-go="${i}" style="width:auto;padding:4px 10px">Ir</button></div>`;
+    $('#bestBox').innerHTML = `<div style="display:flex;justify-content:space-between"><b>Melhor par</b><span class="hint" style="margin:0">${b.aprovadas.length ? '<b style="color:var(--up)">' + b.aprovadas.length + ' aprovado(s)</b>' : 'nenhum com vantagem comprovada'}</span></div>
+      ${h ? `<div style="font-size:20px;font-weight:800;margin-top:4px;color:${h.folga > 0 ? 'var(--up)' : 'var(--text)'}">${esc(h.name)} <span style="font-size:13px;font-weight:600">${TFL[h.tf]} · exp. ${h.expiryMin} min</span></div>` : '<div class="hint">Rode o backtest v2 para ranquear os pares.</div>'}
+      ${b.historico.map(linha).join('')}
+      ${g ? `<div class="hint" style="margin-top:8px">Mais forte agora: <b>${esc(g.name)}</b> ${TFL[g.tf]} · exp. ${g.expiryMin} · ${g.direction} ${pct(g.p)} — ${g.ok ? 'sinal liberado' : esc(g.reason || 'AGUARDAR')}</div>` : ''}
+      <div class="hint">Critério: pior caso do acerto (IC95%) menos o empate do payout real. Abaixo de zero = sem vantagem.</div>`;
+    $('#bestTag').textContent = h ? `melhor: ${h.name} ${TFL[h.tf]} · exp ${h.expiryMin}${h.folga > 0 ? ' ✓' : ' (sem vantagem)'}` : 'melhor par —';
+    $('#bestTag').style.color = h && h.folga > 0 ? 'var(--up)' : ''; $('#bestTag').onclick = () => h && gotoOpp(h);
+    $('#bestBox').querySelectorAll('[data-go]').forEach(x => x.onclick = () => gotoOpp(b.historico[+x.dataset.go]));
+  } catch {}
+}
+async function loadResearch() {
+  try {
+    const r = await (await fetch('/api/research')).json(); if (!r) return;
+    const pct = x => x == null ? '—' : (x * 100).toFixed(1) + '%';
+    const ok = Object.entries(r.combos).filter(([, c]) => c.approved).map(([k]) => k.replace(/\|/g, ' · ').replace(/ · (\d+)$/, ' · exp $1'));
+    const a = r.aggregate;
+    $('#rsSum').innerHTML = `Gerado em ${new Date(r.generatedAt).toLocaleString('pt-BR')} · ${Object.keys(r.combos).length} combinações<br>
+      Fora da amostra, operações independentes: <b>v1 ${a.v1.n} op · ${pct(a.v1.rate)}</b> | <b>v2 ${a.v2.n} op · ${pct(a.v2.rate)}</b><br>
+      Aprovadas (FDR 10%, VE&gt;0, ≥30 op): <b>${ok.length ? ok.map(esc).join(', ') : 'nenhuma'}</b>${r.running ? '<br>Rodando novamente…' : ''}`;
+  } catch {}
 }
 function now() { return Date.now() / 1000 + offset; }
 let ageBase = null, audio = null;
@@ -398,8 +632,8 @@ function notifyUser(n) {
 async function loadSignals() {
   try {
     const r = await (await fetch('/api/signals')).json(), st = r.stats;
-    $('#sigStat').textContent = `${st.avaliados} · ${st.favoraveis}${st.taxa != null ? ' (' + Math.round(st.taxa * 100) + '%)' : ''} de ${st.total}`;
-    $('#sigList').innerHTML = r.signals.slice(-30).reverse().map(x => `<div>${new Date(x.createdAt).toLocaleTimeString('pt-BR')} ${x.direction} ${esc(x.symbol)} ${x.tf}/exp ${x.expiryMin}m · ${x.status}${x.outcome ? ' · ' + x.outcome : ''}${x.invalidReason ? ' · ' + esc(x.invalidReason) : ''}</div>`).join('') || '<div>Nenhum sinal ainda.</div>';
+    $('#sigStat').textContent = `${st.avaliados} · ${st.favoraveis}${st.taxa != null ? ' (' + Math.round(st.taxa * 100) + '%)' : ''} de ${st.total}${st.bloqueados && st.bloqueados.avaliados ? ` · bloqueados: ${st.bloqueados.favoraveisSeOperasse}/${st.bloqueados.avaliados} teriam dado certo` : ''}${st.sombra && st.sombra.avaliados ? ` · teste ao vivo (não aprovadas): ${st.sombra.favoraveis}/${st.sombra.avaliados} (${Math.round(st.sombra.taxa * 100)}%)` : ''}`;
+    $('#sigList').innerHTML = r.signals.slice(-30).reverse().map(x => `<div>${new Date(x.createdAt).toLocaleTimeString('pt-BR')} ${x.direction} ${esc(x.symbol)} ${x.tf}/exp ${x.expiryMin}m · ${x.status}${x.outcome ? ' · ' + x.outcome : ''}${x.invalidReason ? ' · ' + esc(x.invalidReason) : ''}${x.status === 'bloqueado' && x.reason ? ' · ' + esc(x.reason) : ''}</div>`).join('') || '<div>Nenhum sinal ainda.</div>';
   } catch {}
 }
 function renderSignal() {
@@ -526,7 +760,7 @@ $('#cGo').onclick = async () => { $('#cGo').disabled = true; try { await call('c
 $('#cForget').onclick = () => call('forget').then(() => toast('Dados salvos removidos', 'ok')).catch(() => {});
 fetch('/api/trades').then(r => r.json()).then(t => { trades = t; renderTrades(); }).catch(() => {});
 
-setInterval(() => { renderBig(); renderSignal(); if (open) renderOpen(); if (signal && now() >= signal.expiresAt) drawMarkers(); if (ageBase != null) $('#dAge').textContent = ((Date.now() - ageBase) / 1000).toFixed(1) + ' s'; $('#clock').textContent = new Date(now() * 1000).toLocaleTimeString('pt-BR'); }, 1000);
+setInterval(() => { renderBig(); if (positions.length) renderPos(); renderSignal(); if (open) renderOpen(); if (signal && now() >= signal.expiresAt) drawMarkers(); renderCountdown(); if (ageBase != null) $('#dAge').textContent = ((Date.now() - ageBase) / 1000).toFixed(1) + ' s'; $('#clock').textContent = new Date(now() * 1000).toLocaleTimeString('pt-BR'); }, 1000);
 connect();
 document.querySelectorAll('#exp button').forEach(b => b.onclick = () => call('config', { expiryMin: +b.dataset.e }).catch(() => {}));
 $('#minProb').onchange = () => call('config', { minProb: +$('#minProb').value / 100 }).catch(() => {});
@@ -534,7 +768,17 @@ $('#minSamples').onchange = () => call('config', { minSamples: +$('#minSamples')
 $('#maxAge').onchange = () => call('config', { maxDataAgeSec: +$('#maxAge').value }).catch(() => {});
 $('#nOn').onchange = () => { if ($('#nOn').checked && 'Notification' in window && Notification.permission === 'default') Notification.requestPermission(); };
 document.addEventListener('click', () => { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission(); }, { once: true });
-loadSignals(); setInterval(loadSignals, 30000);
+function setTab(t) { document.body.dataset.tab = t; document.querySelectorAll('#mtabs button').forEach(b => b.classList.toggle('on', b.dataset.t === t)); try { localStorage.setItem('tab', t); } catch {} setTimeout(() => chart.applyOptions({ width: $('#chart').clientWidth, height: $('#chart').clientHeight }), 0); }
+document.querySelectorAll('#mtabs button').forEach(b => b.onclick = () => setTab(b.dataset.t));
+let savedTab = 'sinal'; try { savedTab = localStorage.getItem('tab') || 'sinal'; } catch {} setTab(savedTab);
+loadSignals(); setInterval(() => { loadSignals(); loadHistMarks(); }, 30000); setTimeout(loadHistMarks, 3000); loadResearch(); setInterval(loadResearch, 60000); loadBest(); setInterval(loadBest, 30000);
+$('#inCall').onclick = () => call('entered', { direction: 'CALL' }).catch(() => {});
+$('#inPut').onclick = () => call('entered', { direction: 'PUT' }).catch(() => {});
+$('#rsRun').onclick = () => call('research_run').then(() => toast('Backtest v2 iniciado — leva alguns minutos', 'ok')).catch(() => {});
+$('#edgeMargin').onchange = () => call('config', { edgeMargin: +$('#edgeMargin').value / 100 }).catch(() => {});
+$('#anOn').onchange = () => call('config', { analise: $('#anOn').checked ? 1 : 0 }).catch(() => {});
+$('#catFilter').onchange = () => call('config', { catalogFilter: +$('#catFilter').value }).catch(() => {});
+$('#allowUn').onchange = () => call('config', { allowUnapproved: $('#allowUn').checked ? 1 : 0 }).catch(() => {});
 </script>
 </body>
 </html>

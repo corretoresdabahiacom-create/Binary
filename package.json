@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node server/index.js",
     "backtest": "node scripts/backtest.js",
+    "backtest2": "node scripts/backtest2.js",
     "test": "node --test --test-force-exit test/*.test.js"
   },
   "dependencies": {

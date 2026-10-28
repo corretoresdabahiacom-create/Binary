@@ -42,6 +42,19 @@ function buildModel(candles, horizon) {
   return { model: MODEL, horizon, table, samples: used, ties, from: candles[0] && candles[0].epoch, to: candles.at(-1) && candles.at(-1).epoch };
 }
 
+// Atualização incremental: acrescenta a amostra j (resultado em j+horizon já fechado). O(1) por vela.
+function addSample(m, candles, j) {
+  if (!m || j < WARMUP || j + m.horizon >= candles.length) return;
+  const win = candles.slice(Math.max(0, j - 120), j + 1);
+  const keys = stateOf(snapshot(win, computeSeries(win), win.length - 1));
+  if (!keys) return;
+  const d = candles[j + m.horizon].close - candles[j].close;
+  if (d === 0) { m.ties++; return; }
+  m.samples++;
+  for (const k of keys) { const t = m.table.get(k) || { up: 0, n: 0 }; t.n++; if (d > 0) t.up++; m.table.set(k, t); }
+  m.to = candles.at(-1).epoch;
+}
+
 // Estima P(alta) para o estado da vela i de `candles` (pode ser a vela em formação).
 function estimate(m, candles, i, minSamples = 40) {
   if (!m) return null;
@@ -61,4 +74,4 @@ function estimate(m, candles, i, minSamples = 40) {
   return null;
 }
 
-module.exports = { buildModel, estimate, stateOf, wilson, MODEL };
+module.exports = { buildModel, addSample, estimate, stateOf, wilson, MODEL };

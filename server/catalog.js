@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const { computeSeries, snapshot } = require('./indicators');
 
-const DATA_DIR = path.join(__dirname, '..', 'data');
+const DATA_DIR = (process.env.DATA_DIR || path.join(__dirname, '..', 'data'));
 
 // ---------- Estatística ----------
 function wilsonLower(wins, n, z = 1.96) {
@@ -71,16 +71,17 @@ function ruleKey(f, keys) {
 }
 
 // ---------- Construção do catálogo ----------
-// candles: array ordenado por tempo. Resultado da vela i+1: CALL ganha se close > open (empate perde).
+// candles: array ordenado por tempo. Resultado: close[i+horizon] vs close[i] (mesma regra do modelo e da
+// expiração; horizon=1 → próxima vela). Empate não conta.
 function buildCatalog(candles, opts = {}) {
   const {
     minTrain = 40, minTest = 15, trainRatio = 0.7,
     breakeven = 0.52, // 1/(1+payout); ~95% de payout em Rise/Fall
-    minTestRate = 0.55, maxP = 0.05,
+    minTestRate = 0.55, maxP = 0.05, horizon = 1,
   } = opts;
   const series = computeSeries(candles);
   const start = 35; // aquecimento dos indicadores
-  const last = candles.length - 2;
+  const last = candles.length - 1 - horizon;
   if (last - start < 200) throw new Error('histórico insuficiente (mínimo ~240 velas)');
   const split = start + Math.floor((last - start) * trainRatio);
   const train = new Map(), test = new Map();
@@ -88,8 +89,9 @@ function buildCatalog(candles, opts = {}) {
 
   for (let i = start; i <= last; i++) {
     const f = features(candles, series, i);
-    const nxt = candles[i + 1];
-    const up = nxt.close > nxt.open ? 1 : 0;
+    const dd = candles[i + horizon].close - candles[i].close;
+    if (dd === 0) continue;
+    const up = dd > 0 ? 1 : 0;
     const bucket = i < split ? train : test;
     for (const keys of COMBOS) {
       const k = ruleKey(f, keys);
@@ -133,7 +135,7 @@ function buildCatalog(candles, opts = {}) {
     from: candles[0].epoch, to: candles[candles.length - 1].epoch,
     splitEpoch: candles[split].epoch,
     rulesTested: nCombos,
-    breakeven,
+    breakeven, horizon,
     rules: rules.slice(0, 200),
     validated: rules.filter(r => r.validated).length,
   };
@@ -152,7 +154,16 @@ async function fetchHistory(sock, symbol, granularity, pages = 4, onProgress = (
   let end = 'latest';
   let all = [];
   for (let p = 0; p < pages * 10 && all.length < maxCandles; p++) {
-    const res = await sock.send({ ticks_history: symbol, style: 'candles', granularity, count: 5000, end }, { timeoutMs: 30000 });
+    let res;
+    for (let tries = 0; ; tries++) {                       // limite de frequência da Deriv: espera e tenta de novo
+      try { res = await sock.send({ ticks_history: symbol, style: 'candles', granularity, count: 5000, end }, { timeoutMs: 30000 }); break; }
+      catch (e) {
+        if (!/rate limit|RateLimit/i.test(e.message + (e.code || '')) || tries >= 8) throw e;
+        const wait = Math.min(120000, 15000 * (tries + 1));
+        onProgress({ page: p + 1, pages, candles: all.length, waitingMs: wait, reason: 'limite de frequência da Deriv' });
+        await new Promise(r => setTimeout(r, wait));
+      }
+    }
     const cs = (res.candles || []).map(c => ({ epoch: c.epoch, open: +c.open, high: +c.high, low: +c.low, close: +c.close }));
     if (!cs.length) break;
     all = cs.concat(all);
