@@ -3,6 +3,7 @@ const express = require('express');
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
+const secrets = require('./secrets');
 const { WebSocketServer } = require('ws');
 const { Engine } = require('./engine');
 const { createGuard } = require('./access');
@@ -89,11 +90,8 @@ if (scanner) {
   setInterval(() => { if (clients.size) bcast('scan', scanner.view()); }, 2000).unref();
 }
 
-function saveConfig(c) {
-  fs.mkdirSync(path.dirname(CONFIG), { recursive: true });
-  fs.writeFileSync(CONFIG, JSON.stringify(c), { mode: 0o600 });
-}
-function loadConfig() { try { return JSON.parse(fs.readFileSync(CONFIG, 'utf8')); } catch { return null; } }
+function saveConfig(c) { secrets.saveSecure(CONFIG, c); }       // Windows: criptografado (DPAPI); falha = nada é gravado
+function loadConfig() { return secrets.loadSecure(CONFIG); }
 
 async function connectWith(cfg) {
   if (cfg.anthropicKey) process.env.ANTHROPIC_API_KEY = cfg.anthropicKey;
@@ -114,7 +112,7 @@ const handlers = {
   async connect(d) {
     if (!d.token || !d.appId) throw new Error('informe o App ID e o token da Deriv');
     await connectWith(d);
-    if (d.remember) saveConfig({ token: d.token, appId: d.appId, anthropicKey: d.anthropicKey || process.env.ANTHROPIC_API_KEY || '' });
+    if (d.remember) { try { saveConfig({ token: d.token, appId: d.appId, anthropicKey: d.anthropicKey || process.env.ANTHROPIC_API_KEY || '' }); } catch (e) { engine.log('Conectado, mas a configuração NÃO foi salva: ' + e.message, 'warn'); } }
   },
   async select_account(d) {
     const acc = engine.accounts.find(a => a.account_id === d.id);

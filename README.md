@@ -9,13 +9,13 @@ Monitor de mercado para **decisão manual**: o app mostra o gráfico, emite CALL
 **O que o MVP faz** (foco em **forex**: 10 pares no scanner; índices Volatility retirados por não terem vantagem possível — são gerados por sorteio)
 - **Acompanhamento da entrada:** botões “Entrei CALL/PUT” (nenhuma ordem é enviada). O app avisa **ABANDONAR** se o preço virar contra a entrada por mais de 0,5×ATR e o modelo cair abaixo de 45% para a sua direção, com ≥20% do tempo restante; senão **MANTER**. Regra não comprovada em backtest.
 - Dados da **API oficial da Deriv** (WebSocket público), índices sintéticos (Volatility). Fonte identificada na tela.
-- Gráfico de velas **5 min / 15 min / 1 h**; **expiração 5 ou 15 min** escolhida à parte do timeframe.
+- Gráfico de velas **15 min / 1 h**; **expiração 15 ou 60 min** (forex na Deriv: mínimo 15 min; 5 min foi removido por não ser oferecido e não ter dado resultado).
 - **Diagnóstico da fonte:** estado (OK / DESATUALIZADO / DESCONECTADO), idade do último dado, último preço.
 - **Trava de qualidade:** se o dado passar do limite de idade (padrão 20 s) ou a conexão cair, o sinal vigente é **invalidado** e nenhum sinal novo sai até os dados voltarem.
 - **Probabilidade em tempo real (CALL/PUT):** ao abrir o ativo, o app baixa até 10.000 velas da Deriv e mede, para o estado técnico atual (RSI, tendência EMA, momento MACD, Bandas de Bollinger), quantas vezes o preço subiu ou caiu até a expiração escolhida. A barra CALL/PUT atualiza a cada tick (no máx. 1×/s). Mostra nº de casos, intervalo de confiança 95% e o nível usado (se o estado exato tem poucos casos, recua para um estado mais geral).
   - **PRELIMINAR** (vela em formação; alerta quando passa da metade da vela) → **CONFIRMADO** no fechamento → entrada na vela seguinte.
   - Sinal só sai com: probabilidade ≥ mínimo (padrão 56%), ≥ 40 casos, IC95% inteiro acima de 50% e dados frescos. Caso contrário: **AGUARDAR** com o motivo.
-  - Expiração precisa ser múltipla do gráfico (ex.: gráfico 15 min + expiração 5 min = indisponível).
+  - Expiração precisa ser múltipla do gráfico (ex.: gráfico 1 h + expiração 15 min = indisponível).
   - Em índices sintéticos (gerador aleatório) o esperado é quase sempre AGUARDAR — isso é o modelo funcionando, não defeito.
 - **Backtest v2 / regra v2 (botão "Rodar backtest v2" ou `npm run backtest2`):** com dados reais da Deriv, por ativo × gráfico × expiração:
   - walk-forward com embargo; operações **sem sobreposição** (faixa de confiança honesta);
@@ -31,7 +31,7 @@ Monitor de mercado para **decisão manual**: o app mostra o gráfico, emite CALL
   - **Bloqueios (cada um desligável):** integridade dos dados (OHLC inválido, duplicadas, fora de ordem, lacuna intradiária), histórico mínimo, movimento estendido, lateral (ADX < 15), conflito com a tendência ou rompimento não confirmado, pouco espaço até S/R (< 0,5×ATR), volatilidade muito baixa.
   - Cada sinal mostra contexto, padrão, S/R, indicadores, fatores **a favor/contra** e bloqueios, e é gravado com a auditoria completa. Decisões **bloqueadas** também são gravadas e avaliadas (ficam fora da taxa de acerto principal) para medir se cada filtro ajuda.
   - **Backtest v2** passa a reportar: referência simples (seguir a cor da última vela), v1, v2, **v3 = v2 + bloqueios** (é o v3 que é aprovado e vai ao vivo), resultados por regime, acerto que os bloqueados teriam e estabilidade por janela.
-  - Não implementado (sem fonte verificada/autorizada): calendário econômico; spread não se aplica a Rise/Fall (o custo está no payout, que é medido); multi-timeframe como confirmação não foi adicionado porque não há evidência de ganho — os gráficos de 5 e 15 min são avaliados como combinações separadas no scanner.
+  - Não implementado (sem fonte verificada/autorizada): calendário econômico; spread não se aplica a Rise/Fall (o custo está no payout, que é medido); multi-timeframe como confirmação não foi adicionado porque não há evidência de ganho — os gráficos de 15 min e 1 h são avaliados como combinações separadas no scanner.
 - **Celular e tablet:** em retrato, banner do sinal fixo no topo + gráfico + abas (Sinal, Scanner, Análise, Dados, Ajustes); em paisagem, gráfico à esquerda e sinal/abas à direita. Contagem regressiva para o fechamento da vela no gráfico e no banner. Para abrir no celular, use o túnel descrito abaixo (o servidor só escuta em 127.0.0.1).
 - **Desempenho:** processamento por tick e atraso do servidor (p99) medidos e exibidos em Dados; modelo atualizado de forma incremental no fechamento da vela (~0,7 ms em vez de ~50 ms); catálogos calculados em thread separada (não seguram o recebimento de ticks).
 - **Ciclo do sinal:** válido → expirado (janela de entrada acabou) ou invalidado (com motivo). Tudo gravado em `data/signals.json` com ativo, timeframe, expiração, estratégia, horário e idade do dado.
@@ -60,7 +60,9 @@ Scripts: `npm run backtest2`, `node scripts/backtest-contratos.js [1,2,3]`, `nod
 
 ## Recursos herdados (desligados no MVP)
 
-Execução de ordens, robôs e conta real exigem `TRADING_ENABLED=1` no `.env`. Documentação original abaixo.
+Execução de ordens, robôs e conta real exigem `TRADING_ENABLED=1` no `.env` (padrão `0`: o app só analisa e sinaliza). A documentação original abaixo descreve o MVP inicial; as partes de robô/negociação ficam desativadas por padrão e não foram validadas com lucro em nenhum teste.
+
+**Token salvo:** no Windows o arquivo `data/config.json` é criptografado com DPAPI (só o seu usuário, neste PC, consegue ler); se a proteção falhar, nada é gravado. Em outros sistemas usa permissão 0600. Arquivos antigos em texto simples são convertidos na próxima vez que você marcar "Lembrar".
 
 ### Deriv Signal Desk (base original)
 
