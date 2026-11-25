@@ -10,7 +10,7 @@
 const R = require('../server/research');
 const SYMS = (process.argv[2] || 'frxEURUSD,frxGBPUSD,frxUSDJPY,frxAUDUSD,frxUSDCAD,frxUSDCHF,frxNZDUSD,frxEURGBP,frxEURJPY,frxGBPJPY').split(',');
 const GRAN = +(process.argv[3] || 900);
-const PAY = 0.78, BE = 1 / (1 + PAY), NM = s => s.replace('frx', '').replace(/(...)(...)/, '$1/$2');
+let PAY = 0.78; const BE = 1 / (1 + PAY), NM = s => s.replace('frx', '').replace(/(...)(...)/, '$1/$2');
 const pct = x => (x == null ? '  -  ' : (x * 100).toFixed(1).padStart(5) + '%');
 
 function synth(n, seed = 7) { let s = seed, r = () => (s = (s * 16807) % 2147483647) / 2147483647, p = 1, t = 1700000000, o = []; for (let i = 0; i < n; i++) { const op = p; let h = op, l = op; for (let k = 0; k < 20; k++) { p *= 1 + (r() - 0.5) * 0.0006; h = Math.max(h, p); l = Math.min(l, p); } o.push({ epoch: t += GRAN, open: op, high: h, low: l, close: p }); } return o; }
@@ -35,6 +35,12 @@ const wil = (w, n) => { if (!n) return 0; const z = 1.645, p = w / n, d = 1 + z 
     for (const s of SYMS) { try { data[s] = await fetchHistory(sock, s, GRAN, 2, () => {}, 10000); console.log(`${NM(s)}: ${data[s].length} velas (${((data[s].at(-1).epoch - data[s][0].epoch) / 86400).toFixed(0)} dias)`); } catch (e) { console.log(NM(s), 'PULADO', e.message); } await new Promise(r => setTimeout(r, 2500)); }
     sock.close();
   }
+  // payout real por par (Rise/Fall 15 min, proposta da Deriv agora); sem resposta → 78% e marca
+  const PAYS = {};
+  if (!process.env.SYNTH) { const deriv = require('../server/deriv'); const sock = deriv.publicSocket(); await sock.connect();
+    for (const s of Object.keys(data)) { PAYS[s] = { v: 0.78, src: 'padrão' }; try { const r = await sock.send({ proposal: 1, contract_type: 'CALL', underlying_symbol: s, currency: 'USD', amount: 10, basis: 'stake', duration: 15, duration_unit: 'm' }, { timeoutMs: 10000 }); const q = +r.proposal.payout; if (q > 10) PAYS[s] = { v: q / 10 - 1, src: 'Deriv agora' }; } catch (e) { PAYS[s].src = 'padrão (' + e.message.slice(0, 40) + ')'; } await new Promise(r => setTimeout(r, 1500)); }
+    sock.close(); } else for (const s of Object.keys(data)) PAYS[s] = { v: 0.78, src: 'sintético' };
+  console.log('Payout real por par: ' + Object.entries(PAYS).map(([s, p]) => `${NM(s)} ${pct(p.v)} (${p.src})`).join(' · '));
   const configs = [];
   for (const N of [2, 3, 4, 5]) for (const scheme of [0, 1, 2]) for (const minN of [20, 40]) for (const thr of [0.56, 0.6]) configs.push({ fam: 'A', N, scheme, minN, thr });
   for (const k of [30, 60]) for (const thr of [0.58, 0.62]) configs.push({ fam: 'B', k, thr });
@@ -83,6 +89,14 @@ const wil = (w, n) => { if (!n) return 0; const z = 1.645, p = w / n, d = 1 + z 
   console.log('\nMelhores 12 (só inspeção; ranking = viés de seleção):');
   rows.sort((a, b) => b.rate - a.rate).slice(0, 12).forEach(r => console.log(`  ${nm(r).padEnd(34)} ${String(r.n).padStart(6)} op acerto ${pct(r.rate)} IC90inf ${pct(wil(r.w, r.n))} p(>empate)=${r.pBE.toFixed(4)}`));
   console.log(`\nSignificativas após correção FDR 10%: acima do empate → ${ok.size} (de ${rows.length}). Acima de 50% → ${R.benjaminiHochberg(rows.map(r => r.p50), 0.1).size}`);
+  // ---- por par, com o EMPATE DO PRÓPRIO PAR (payout real) ----
+  const pc = []; res.forEach(r => Object.entries(r.byPair).forEach(([sym, q]) => { if (q.n >= 30) { const be = 1 / (1 + PAYS[sym].v); pc.push({ sym, nome: nm(r), n: q.n, w: q.w, rate: q.w / q.n, be, pBE: R.binomTailP(q.w, q.n, be), lb: wil(q.w, q.n) }); } }));
+  const ok2 = R.benjaminiHochberg(pc.map(x => x.pBE), 0.1);
+  console.log(`\n=== POR PAR, empate do próprio par: ${pc.length} combinações par×configuração (≥30 op) ===`);
+  for (const sym of Object.keys(PAYS).sort((a, b) => PAYS[b].v - PAYS[a].v)) { const xs = pc.filter(x => x.sym === sym); if (!xs.length) continue; const n = xs.reduce((a, x) => a + x.n, 0), w = xs.reduce((a, x) => a + x.w, 0), be = 1 / (1 + PAYS[sym].v); const best = xs.slice().sort((a, b) => b.lb - a.lb)[0];
+    console.log(`  ${NM(sym).padEnd(8)} payout ${pct(PAYS[sym].v)} empate ${pct(be)} | todas as configs: ${String(n).padStart(6)} op acerto ${pct(w / n)} | melhor por IC90inf: ${best.nome} ${best.n} op ${pct(best.rate)} IC90inf ${pct(best.lb)} p=${best.pBE.toFixed(3)}`); }
+  const sig = pc.filter((x, i) => ok2.has(i)); console.log(`Significativas acima do empate do próprio par (FDR 10%): ${sig.length} de ${pc.length}${sig.length ? ' → ' + sig.map(x => NM(x.sym) + ' ' + x.nome + ' ' + pct(x.rate) + ' (' + x.n + ' op, empate ' + pct(x.be) + ')').join('; ') : ''}`);
+  const hi = pc.filter(x => PAYS[x.sym].v >= 0.85); if (hi.length) { const n = hi.reduce((a, x) => a + x.n, 0), w = hi.reduce((a, x) => a + x.w, 0), eb = hi.reduce((a, x) => a + x.n * x.be, 0) / n; console.log(`Pares com payout ≥85% somados: ${n} op, acerto ${pct(w / n)} vs empate médio ${pct(eb)}`); }
   const pr = {}; rows.forEach(r => Object.entries(r.byPair).forEach(([s, p]) => { const q = pr[s] = pr[s] || { n: 0, w: 0 }; q.n += p.n; q.w += p.w; }));
   console.log('Por par (todas as configs somadas): ' + Object.entries(pr).map(([s, p]) => `${NM(s)} ${pct(p.w / p.n)}`).join(' · '));
 })().catch(e => { console.error('falhou:', e.stack); process.exit(1); });
