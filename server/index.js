@@ -3,6 +3,7 @@ const express = require('express');
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
+const secrets = require('./secrets');
 const { WebSocketServer } = require('ws');
 const { Engine } = require('./engine');
 const { createGuard } = require('./access');
@@ -25,6 +26,13 @@ const scanner = process.env.SCANNER === '0' ? null : new Scanner({
   isActive: (sym, tf, exp) => engine.symbol === sym && engine.tf === tf && engine.cfg.expiryMin === exp,
   record: sig => engine._record(sig),
 });
+// Teste em frente (só registro): regra congelada do USD/JPY; ver server/forward.js
+const { Forward } = require('./forward');
+let _pc = { t: 0, v: 0 };   // uma consulta de payout serve às 4 regras do teste em frente (por vela)
+const forward = scanner ? new Forward({ payoutFn: async () => { if (Date.now() - _pc.t < 20000 && _pc.v > 0) return _pc.v; const r = await scanner.sock.send({ proposal: 1, contract_type: 'CALL', underlying_symbol: 'frxUSDJPY', currency: 'USD', amount: 10, basis: 'stake', duration: 15, duration_unit: 'm' }, { timeoutMs: 8000 }); const q = +r.proposal.payout; const v = q > 10 ? q / 10 - 1 : 0; _pc = { t: Date.now(), v }; return v; } }) : null;
+const { ForwardCtx } = require('./forward2');
+const forward2 = scanner ? new ForwardCtx({ payoutFn: forward && forward.payoutFn }) : null;
+if (scanner) { scanner.forward = forward; scanner.forward2 = forward2; }
 const guard = process.env.CF_ACCESS_TEAM_DOMAIN && process.env.CF_ACCESS_AUD
   ? createGuard({ teamDomain: process.env.CF_ACCESS_TEAM_DOMAIN, aud: process.env.CF_ACCESS_AUD }) : null;
 const app = express();
@@ -59,6 +67,8 @@ function bestPairs() {
   return out;
 }
 app.get('/api/best', (req, res) => res.json(bestPairs()));
+app.get('/api/forward', (req, res) => res.json(forward ? { ...forward.summary(), recent: forward.rows.slice(-20) } : { disabled: true }));
+app.get('/api/forward2', (req, res) => res.json(forward2 ? forward2.summary() : { disabled: true }));
 app.get('/api/scan', (req, res) => res.json(scanner ? scanner.view() : []));
 app.get('/api/status', (req, res) => res.json(engine.publicState()));
 const server = http.createServer(app);
@@ -89,11 +99,8 @@ if (scanner) {
   setInterval(() => { if (clients.size) bcast('scan', scanner.view()); }, 2000).unref();
 }
 
-function saveConfig(c) {
-  fs.mkdirSync(path.dirname(CONFIG), { recursive: true });
-  fs.writeFileSync(CONFIG, JSON.stringify(c), { mode: 0o600 });
-}
-function loadConfig() { try { return JSON.parse(fs.readFileSync(CONFIG, 'utf8')); } catch { return null; } }
+function saveConfig(c) { secrets.saveSecure(CONFIG, c); }       // Windows: criptografado (DPAPI); falha = nada é gravado
+function loadConfig() { return secrets.loadSecure(CONFIG); }
 
 async function connectWith(cfg) {
   if (cfg.anthropicKey) process.env.ANTHROPIC_API_KEY = cfg.anthropicKey;
@@ -114,7 +121,7 @@ const handlers = {
   async connect(d) {
     if (!d.token || !d.appId) throw new Error('informe o App ID e o token da Deriv');
     await connectWith(d);
-    if (d.remember) saveConfig({ token: d.token, appId: d.appId, anthropicKey: d.anthropicKey || process.env.ANTHROPIC_API_KEY || '' });
+    if (d.remember) { try { saveConfig({ token: d.token, appId: d.appId, anthropicKey: d.anthropicKey || process.env.ANTHROPIC_API_KEY || '' }); } catch (e) { engine.log('Conectado, mas a configuração NÃO foi salva: ' + e.message, 'warn'); } }
   },
   async select_account(d) {
     const acc = engine.accounts.find(a => a.account_id === d.id);
