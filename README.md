@@ -105,3 +105,9 @@ O servidor só escuta em 127.0.0.1 e recusa conexões WebSocket de outros sites.
 ## Publicar num servidor (Cloudflare Tunnel + Access)
 
 O app não tem login próprio. Publique **somente** atrás do Cloudflare Access (com `CF_ACCESS_TEAM_DOMAIN` e `CF_ACCESS_AUD` definidos, toda requisição HTTP e WebSocket exige um JWT válido do Access). O servidor continua escutando só em 127.0.0.1; o túnel (cloudflared) roda na mesma máquina e só faz conexões de saída. Passo a passo e script: `deploy/setup-vps.sh`.
+
+## Teste em frente (EXPERIMENTAL — não é sinal operacional)
+
+`server/forward.js` congela uma única regra (USD/JPY 15m, memória de 3 velas por cor, contra a última vela quando a maioria histórica ≥ 56% com ≥ 40 casos) e **apenas registra** previsões e resultados em `data/forward.jsonl`. Não executa ordens e não aparece como sinal.
+A regra foi escolhida num backtest (seleção entre 291 configs, sem significância após FDR), então só o resultado **daqui para frente** vale. Consulte `GET /api/forward`.
+Conclusão só com ~300 operações resolvidas: compare o limite inferior de Wilson (90%) com o break-even do payout medido. Antes disso, trate como ruído.

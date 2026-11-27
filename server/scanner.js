@@ -35,6 +35,7 @@ const TFS = { '15m': 900, '1h': 3600 };
 const EXPIRIES = [5, 15];
 const HIST = 10000, LIVE = 300;
 
+const { RULE: forwardRule } = require('./forward');
 class Scanner extends EventEmitter {
   // getCfg(): { minProb, minSamples, maxDataAgeSec, windowPct }; isActive(sym, tf, exp): combinação aberta no painel
   constructor({ getCfg, isActive = () => false, symbols = DEFAULT_SYMBOLS, tfs = Object.keys(TFS), record = () => {} } = {}) {
@@ -106,6 +107,7 @@ class Scanner extends EventEmitter {
       if (Number.isInteger(hz) && hz >= 1) st.models[exp] = prob.buildModel(st.hist, hz);
     }
     st.loaded = true;
+    if (this.forward && st.sym === forwardRule.symbol && st.tf === forwardRule.tf) this.forward.seed(st.hist);   // teste em frente: só registra
     st.catalogs = st.catalogs || {};
     this._catTimer(st);
     this.emit('loaded', { sym: st.sym, tf: st.tf, samples: st.hist.length });
@@ -166,6 +168,7 @@ class Scanner extends EventEmitter {
     if (st.loaded && (!st.hist.length || closed.epoch > st.hist.at(-1).epoch)) {
       st.hist.push(closed); if (st.hist.length > HIST + 2000) st.hist.shift();
       for (const m of Object.values(st.models)) prob.addSample(m, st.hist, st.hist.length - 1 - m.horizon); // incremental, sem dados futuros
+      if (this.forward && st.sym === forwardRule.symbol && st.tf === forwardRule.tf) { try { this.forward.onClosed(st.hist); } catch (e) { this.emit('log', 'teste em frente: ' + e.message); } }
     }
     this._evaluate(st);
     this._confirm(st, c);
