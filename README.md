@@ -111,3 +111,6 @@ O app não tem login próprio. Publique **somente** atrás do Cloudflare Access 
 `server/forward.js` congela uma única regra (USD/JPY 15m, memória de 3 velas por cor, contra a última vela quando a maioria histórica ≥ 56% com ≥ 40 casos) e **apenas registra** previsões e resultados em `data/forward.jsonl`. Não executa ordens e não aparece como sinal.
 A regra foi escolhida num backtest (seleção entre 291 configs, sem significância após FDR), então só o resultado **daqui para frente** vale. Consulte `GET /api/forward`.
 Conclusão só com ~300 operações resolvidas: compare o limite inferior de Wilson (90%) com o break-even do payout medido. Antes disso, trate como ruído.
+
+### Teste em frente nº 2 (EXPERIMENTAL — só registro)
+`server/forward2.js` congela 3 famílias de contexto (local da vela × sequência) do USD/JPY 15m, escolhidas no backtest fora da amostra de 27/11 (**nenhuma passou FDR**): `r50+rg|s2`, `t4|s2`, `r50|s3`. Registra em `data/forward-ctx.jsonl`, com o payout de cada entrada, e separa payout alto (≥85%) de baixo no resumo `GET /api/forward2`. Não abre ordens. Conclusão só com ~300 operações por regra.
